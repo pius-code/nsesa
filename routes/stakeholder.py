@@ -16,8 +16,6 @@ async def register_stakeholder(
 
 
 
-
-
 @router.post("/login")
 async def login_stakeholder(payload: StakeholderLogin):
     """Login stakeholder and return JWT token"""
