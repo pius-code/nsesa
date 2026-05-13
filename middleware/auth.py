@@ -68,4 +68,4 @@ async def admin_protected_route(request: Request):
             detail="Admin access required",  # noqa
         )
     else:
-        return user
+        return user.get("sub")

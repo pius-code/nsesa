@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from schema.stakeholder import StakeholderCreate, StakeholderLogin , StakeholderResponse
-from repository.stakeholder import create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password
+from schema.stakeholder import StakeholderCreate, StakeholderLogin, StakeholderResponse # noqa
+from repository.stakeholder import create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password # noqa
 from utils.hasher import verifyPwd
 from helpers.auth import generate_token
 
@@ -15,14 +15,13 @@ async def register_stakeholder(
     return await create_stakeholder(payload)  # type: ignore
 
 
-
 @router.post("/login")
 async def login_stakeholder(payload: StakeholderLogin):
     """Login stakeholder and return JWT token"""
     stakeholder = await get_Stakeholder_by_email(payload.worker_email)
     if not stakeholder:
         raise HTTPException(status_code=404, detail="Stakeholder not found")
-    hashed_password = await get_stakeholder_hashed_password(payload.worker_email)
+    hashed_password = await get_stakeholder_hashed_password(payload.worker_email) # noqa
     if not verifyPwd(payload.worker_password, str(hashed_password)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = generate_token(str(stakeholder.id))

@@ -1,12 +1,12 @@
 # models/stakeholder.py
-from beanie import Document, Indexed, before_event, Replace, Insert, SaveChanges
+from beanie import Document, Indexed, before_event, Replace, Insert, SaveChanges # noqa
 from datetime import datetime, timezone
 from typing import Annotated
 
 
 class Stakeholder(Document):
     worker_name: str
-    worker_shop_name: str
+    worker_shop_name: Annotated[str, Indexed()]
     worker_branch_name: str
     worker_role: str  # "admin" | "worker"
     worker_email: Annotated[str, Indexed(unique=True)]

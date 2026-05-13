@@ -12,6 +12,13 @@ class StakeholderCreate(BaseModel):
     worker_password: str  # plain, will be hashed in the route
 
 
+class adminStakeholderCreateWorker(BaseModel):
+    worker_name: str
+    worker_role: str  # "admin" | "worker"
+    worker_email: str
+    worker_password: str   # default to admin for this schema
+
+
 class StakeholderLogin(BaseModel):
     worker_email: str
     worker_password: str
@@ -36,4 +43,3 @@ class StakeholderResponse(BaseModel):
     last_login: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-

@@ -1,13 +1,19 @@
 from utils.hasher import hashPwd
 from fastapi import HTTPException
 from model.Stakeholder import Stakeholder
-from schema.stakeholder import StakeholderCreate, StakeholderUpdate, StakeholderResponse
+from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse # noqa
+from beanie import PydanticObjectId
 
 
 async def create_stakeholder(payload: StakeholderCreate):
-    existing = await Stakeholder.find_one(Stakeholder.worker_email == payload.worker_email)
-    if existing:
-        raise HTTPException(status_code=400, detail="Worker with this email already exists")
+    existing_email = await Stakeholder.find_one(Stakeholder.worker_email == payload.worker_email) # noqa
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Worker with this email already exists") # noqa
+
+    if payload.worker_role == "admin":
+        existing_shop = await Stakeholder.find_one(Stakeholder.worker_shop_name == payload.worker_shop_name) # noqa
+        if existing_shop:
+            raise HTTPException(status_code=400, detail="A shop with this name already exists") # noqa
 
     new_worker = Stakeholder(
         worker_name=payload.worker_name,
@@ -20,7 +26,43 @@ async def create_stakeholder(payload: StakeholderCreate):
     await new_worker.insert()
     return {
         "message": "Worker created successfully",
-        "worker_id": str(new_worker.id),
+        "worker": str(new_worker.id),
+    }
+
+
+async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: str): # noqa
+    print(admin) # noqa
+    existing = await Stakeholder.find_one(Stakeholder.worker_email == payload.worker_email) # noqa
+    worker_admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin)) # noqa
+    if not worker_admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+    if existing:
+        raise HTTPException(status_code=400, detail="Worker with this email already exists") # noqa
+    if worker_admin.worker_role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create workers") # noqa
+    new_worker = Stakeholder(
+        worker_name=payload.worker_name,
+        worker_shop_name=worker_admin.worker_shop_name, # noqa
+        worker_branch_name=worker_admin.worker_branch_name, # noqa
+        worker_role=payload.worker_role,
+        worker_email=payload.worker_email,
+        worker_hashed_password=hashPwd(payload.worker_password),
+    )
+    await new_worker.insert()
+    return {
+        "message": "Worker created successfully",
+        "worker": StakeholderResponse(
+            id=str(new_worker.id),
+            worker_name=new_worker.worker_name,
+            worker_shop_name=new_worker.worker_shop_name,
+            worker_branch_name=new_worker.worker_branch_name,
+            worker_role=new_worker.worker_role,
+            worker_email=new_worker.worker_email,
+            is_active=new_worker.is_active,
+            last_login=new_worker.last_login,
+            created_at=new_worker.created_at,
+            updated_at=new_worker.updated_at,
+        )
     }
 
 

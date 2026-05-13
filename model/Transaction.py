@@ -1,5 +1,5 @@
 # models/transaction.py
-from beanie import Document, Indexed, before_event, Replace, Insert, SaveChanges
+from beanie import Document, Indexed, before_event, Replace, Insert, SaveChanges # noqa
 from datetime import datetime, timezone
 from typing import Annotated, List
 from pydantic import BaseModel
