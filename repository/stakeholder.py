@@ -66,6 +66,25 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
     }
 
 
+async def get_workers_by_shop(shop_name: str):
+    workers = await Stakeholder.find(Stakeholder.worker_shop_name == shop_name).to_list() # noqa
+    return [
+        StakeholderResponse(
+            id=str(w.id),
+            worker_name=w.worker_name,
+            worker_shop_name=w.worker_shop_name,
+            worker_branch_name=w.worker_branch_name,
+            worker_role=w.worker_role,
+            worker_email=w.worker_email,
+            is_active=w.is_active,
+            last_login=w.last_login,
+            created_at=w.created_at,
+            updated_at=w.updated_at,
+        )
+        for w in workers
+    ]
+
+
 async def get_all_stakeholders():
     workers = await Stakeholder.find_all().to_list()
     return [
@@ -134,4 +153,11 @@ async def get_stakeholder_hashed_password(email: str) -> str | None:
     stakeholder = await Stakeholder.find_one(Stakeholder.worker_email == email)
     if stakeholder:
         return stakeholder.worker_hashed_password
+    return None
+
+
+async def get_stakeholder_worker_shop_name(id: str) -> str | None:
+    stakeholder = await Stakeholder.get(PydanticObjectId(id))
+    if stakeholder:
+        return stakeholder.worker_shop_name
     return None

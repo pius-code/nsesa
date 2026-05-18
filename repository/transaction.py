@@ -6,7 +6,7 @@ from schema.transaction import TransactionCreate
 from model.Inventory import Inventory
 
 
-async def save_an_nsesa_transaction(payload: TransactionCreate):
+async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str): # noqa
     # 1. Fetch and validate inventory items before taking any action
     inventory_items_map = {} # noqa 
     for item in payload.items:
@@ -47,6 +47,7 @@ async def save_an_nsesa_transaction(payload: TransactionCreate):
         customer_number=payload.customer_number,
         customer_email=payload.customer_email,
         processed_by=payload.processed_by,
+        at_shop=shop_name
     )
     await new_transaction.insert()  # noqa
 
@@ -54,3 +55,9 @@ async def save_an_nsesa_transaction(payload: TransactionCreate):
         "message": "Transaction saved successfully",
         "transaction_id": str(new_transaction.id),
     }
+
+
+async def get_my_shop_transactions(shop_name: str):
+    """Get all transactions for my shop"""
+    transactions = await Transaction.find(Transaction.at_shop == shop_name).to_list()  # noqa
+    return transactions

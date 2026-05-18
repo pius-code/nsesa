@@ -3,7 +3,8 @@ from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 import os
 from dotenv import load_dotenv
-from core.admin import ADMIN_IDS
+from model.Stakeholder import Stakeholder
+from beanie import PydanticObjectId
 
 load_dotenv()
 
@@ -62,10 +63,22 @@ async def get_current_user_optional(request: Request) -> dict | None:
 
 async def admin_protected_route(request: Request):
     user = await get_current_user(request)
-    if user.get("sub") not in ADMIN_IDS:
+    sub = user.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated" # noqa
+        )
+    # Fetch user from the database to check their role
+    try:
+        stakeholder = await Stakeholder.get(PydanticObjectId(sub))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format" # noqa
+        )
+
+    if not stakeholder or stakeholder.worker_role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",  # noqa
         )
-    else:
-        return user.get("sub")
+    return sub

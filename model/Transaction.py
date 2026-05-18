@@ -24,6 +24,7 @@ class Transaction(Document):
     synced_at: datetime | None = None  # None means pending sync from local
     created_at: datetime = datetime.now(timezone.utc)
     updated_at: datetime = datetime.now(timezone.utc)
+    at_shop: str
 
     @before_event([Replace, Insert, SaveChanges])
     def update_timestamp(self):
