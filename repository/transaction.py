@@ -1,12 +1,17 @@
 # repository/transaction.py
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 from beanie import PydanticObjectId
 from model.Transaction import Transaction, TransactionItem
 from schema.transaction import TransactionCreate
 from model.Inventory import Inventory
+from model.Stakeholder import Stakeholder
+from utils.arkesel_sms import send_transaction_receipt_sms
+import os
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
-async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str): # noqa
+async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, background_tasks: BackgroundTasks = None): # noqa
     # 1. Fetch and validate inventory items before taking any action
     inventory_items_map = {} # noqa 
     for item in payload.items:
@@ -40,16 +45,41 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str):
             })
 
     # 4. Save the actual transaction document
+    worker = await Stakeholder.find_one(
+        Stakeholder.id == PydanticObjectId(payload.processed_by)
+    )
+    shop_image = worker.worker_shop_image if worker else None
+
+    new_id = PydanticObjectId()
+    receipt_id = f"{shop_name}_{str(new_id)[-8:].upper()}"
     new_transaction = Transaction(
+        id=new_id,
+        receipt_id=receipt_id,
+        shop_image=shop_image,
         customer_name=payload.customer_name,
         items=[TransactionItem(**item.model_dump()) for item in payload.items],  # noqa
         total_price=payload.total_price,
         customer_number=payload.customer_number,
         customer_email=payload.customer_email,
+        payment_mode=payload.payment_mode,
         processed_by=payload.processed_by,
         at_shop=shop_name
     )
     await new_transaction.insert()  # noqa
+
+    if payload.send_sms and new_transaction.customer_number and background_tasks:
+        receipt_url = f"{FRONTEND_URL}/receipts/{new_transaction.receipt_id}"
+        background_tasks.add_task(
+            send_transaction_receipt_sms,
+            phone_number=new_transaction.customer_number,
+            customer_name=new_transaction.customer_name,
+            transaction_id=str(new_transaction.id),
+            shop_name=shop_name,
+            total_price=new_transaction.total_price,
+            items=[item.model_dump() for item in new_transaction.items],
+            receipt_url=receipt_url,
+            payment_mode=new_transaction.payment_mode,
+        )
 
     return {
         "message": "Transaction saved successfully",
@@ -61,3 +91,11 @@ async def get_my_shop_transactions(shop_name: str):
     """Get all transactions for my shop"""
     transactions = await Transaction.find(Transaction.at_shop == shop_name).to_list()  # noqa
     return transactions
+
+
+async def get_transaction_by_receipt_id(receipt_id: str):
+    transaction = await Transaction.find_one(Transaction.receipt_id == receipt_id)
+    if not transaction:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    return transaction

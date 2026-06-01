@@ -11,6 +11,7 @@ class Stakeholder(Document):
     worker_role: str  # "admin" | "worker"
     worker_email: Annotated[str, Indexed(unique=True)]
     worker_hashed_password: str
+    worker_shop_image: str = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif"
     is_active: bool = True
     last_login: datetime | None = None
     created_at: datetime = datetime.now(timezone.utc)

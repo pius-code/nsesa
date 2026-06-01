@@ -21,7 +21,9 @@ PUBLIC_PATHS = [
 
 
 async def verify_token_middleware(request: Request, call_next):
-    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS:
+    is_public_receipt = request.url.path.startswith("/api/v1/receipt/")
+    is_public = request.url.path in PUBLIC_PATHS or is_public_receipt
+    if request.method == "OPTIONS" or is_public:
         return await call_next(request)
 
     auth_header = request.headers.get("Authorization")

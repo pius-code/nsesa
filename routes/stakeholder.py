@@ -35,6 +35,7 @@ async def login_stakeholder(payload: StakeholderLogin):
             worker_branch_name=stakeholder.worker_branch_name,
             worker_role=stakeholder.worker_role,
             worker_email=stakeholder.worker_email,
+            worker_shop_image=stakeholder.worker_shop_image,
             is_active=stakeholder.is_active,
             last_login=stakeholder.last_login,
             created_at=stakeholder.created_at,

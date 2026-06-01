@@ -14,11 +14,14 @@ class TransactionItem(BaseModel):
 
 
 class Transaction(Document):
-    customer_name: str  # auto-generated or user-provided
+    customer_name: str
     items: List[TransactionItem]
     total_price: float
+    receipt_id: str | None = None
+    shop_image: str | None = None
     customer_number: str | None = None
     customer_email: str | None = None
+    payment_mode: str | None = None
     processed_by: Annotated[str, Indexed()]  # worker ID
     status: str = "success"  # success | returned | rejected
     synced_at: datetime | None = None  # None means pending sync from local

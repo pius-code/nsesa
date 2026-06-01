@@ -1,10 +1,25 @@
-def gen_template(full_name: str, tracking_id: str, message: str) -> str:
-    template = f"""
-Dear {full_name},
-Your payment has been recieved and your application is currently being reviewed by our team.
-Track your application status on
- careers.skyvotes.org/track/{tracking_id}.
-Tracking ID: {tracking_id}
-"""
-
-    return template
+def gen_transaction_receipt(
+    customer_name: str,
+    transaction_id: str,
+    shop_name: str,
+    total_price: float,
+    items: list,
+    receipt_url: str,
+    payment_mode: str | None = None,
+) -> str:
+    short_id = transaction_id[-8:].upper()
+    item_lines = "\n".join(
+        f"  {item['product_name']} x{item['quantity']}"
+        f" = GHS {item['subtotal']:.2f}"
+        for item in items
+    )
+    payment_line = f"Payment: {payment_mode.upper()}\n" if payment_mode else ""
+    return (
+        f"{shop_name}\n"
+        f"Receipt #{short_id}\n"
+        f"{item_lines}\n"
+        f"Total: GHS {total_price:.2f}\n"
+        f"{payment_line}"
+        f"Thank you, {customer_name}!\n"
+        f"View receipt: {receipt_url}"
+    )

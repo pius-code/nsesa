@@ -11,9 +11,11 @@ class TransactionItemCreate(BaseModel):
 
 
 class TransactionCreate(BaseModel):
-    customer_name: str
+    customer_name: Optional[str] = "customer"
     items: List[TransactionItemCreate]
     total_price: float
     customer_number: Optional[str] = None
     customer_email: Optional[str] = None
+    payment_mode: Optional[str] = None
     processed_by: str  # worker ID
+    send_sms: bool = False

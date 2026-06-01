@@ -2,6 +2,7 @@ from model.Inventory import Inventory
 from schema.inventory import InventoryCreate
 from beanie import PydanticObjectId
 from model.Stakeholder import Stakeholder
+from fastapi import HTTPException
 
 
 async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
@@ -30,6 +31,24 @@ async def get_all_inventory_items_for_shop(worker_id: str):
         return {"message": "Unauthorized to view inventory items"}  # noqa
     items = await Inventory.find(Inventory.worker_shop_name == worker.worker_shop_name, Inventory.is_deleted == False).to_list() # noqa
     return items
+
+
+async def update_stock(inventory_id: str, new_amount: int, admin: str):
+    admin_record = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin))  # noqa
+    if not admin_record:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    item = await Inventory.get(PydanticObjectId(inventory_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+
+    if item.worker_shop_name != admin_record.worker_shop_name:
+        raise HTTPException(status_code=403, detail="Item does not belong to your shop")  # noqa
+
+    item.amount_available = new_amount
+    item.is_available = new_amount > 0
+    await item.save()
+    return {"message": "Stock updated successfully", "item": item}
 
 
 async def delete_inventory_item(inventory_id: str, admin: str):

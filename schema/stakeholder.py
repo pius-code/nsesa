@@ -3,6 +3,12 @@ from typing import Optional
 from datetime import datetime
 
 
+DEFAULT_SHOP_IMAGE = ( # noqa
+    "https://res.cloudinary.com/dho3j5aqn/image/upload"
+    "/v1780329934/simple1_jdsqio.avif"
+)
+
+
 class StakeholderCreate(BaseModel):
     worker_name: str
     worker_shop_name: str
@@ -10,6 +16,7 @@ class StakeholderCreate(BaseModel):
     worker_role: str  # "admin" | "worker"
     worker_email: str
     worker_password: str  # plain, will be hashed in the route
+    worker_shop_image: Optional[str] = DEFAULT_SHOP_IMAGE
 
 
 class adminStakeholderCreateWorker(BaseModel):
@@ -22,6 +29,10 @@ class adminStakeholderCreateWorker(BaseModel):
 class StakeholderLogin(BaseModel):
     worker_email: str
     worker_password: str
+
+
+class ShopImageUpdate(BaseModel):
+    worker_shop_image: str
 
 
 class StakeholderUpdate(BaseModel):
@@ -39,6 +50,7 @@ class StakeholderResponse(BaseModel):
     worker_branch_name: str
     worker_role: str
     worker_email: str
+    worker_shop_image: str
     is_active: bool
     last_login: Optional[datetime] = None
     created_at: datetime

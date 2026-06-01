@@ -1,7 +1,7 @@
 from utils.hasher import hashPwd
 from fastapi import HTTPException
 from model.Stakeholder import Stakeholder
-from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse # noqa
+from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse, ShopImageUpdate # noqa
 from beanie import PydanticObjectId
 
 
@@ -58,6 +58,7 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
             worker_branch_name=new_worker.worker_branch_name,
             worker_role=new_worker.worker_role,
             worker_email=new_worker.worker_email,
+            worker_shop_image=new_worker.worker_shop_image,
             is_active=new_worker.is_active,
             last_login=new_worker.last_login,
             created_at=new_worker.created_at,
@@ -76,6 +77,7 @@ async def get_workers_by_shop(shop_name: str):
             worker_branch_name=w.worker_branch_name,
             worker_role=w.worker_role,
             worker_email=w.worker_email,
+            worker_shop_image=w.worker_shop_image,
             is_active=w.is_active,
             last_login=w.last_login,
             created_at=w.created_at,
@@ -95,6 +97,7 @@ async def get_all_stakeholders():
             worker_branch_name=w.worker_branch_name,
             worker_role=w.worker_role,
             worker_email=w.worker_email,
+            worker_shop_image=w.worker_shop_image,
             is_active=w.is_active,
             last_login=w.last_login,
             created_at=w.created_at,
@@ -115,11 +118,21 @@ async def get_stakeholder_by_id(worker_id: str):
         worker_branch_name=worker.worker_branch_name,
         worker_role=worker.worker_role,
         worker_email=worker.worker_email,
+        worker_shop_image=worker.worker_shop_image,
         is_active=worker.is_active,
         last_login=worker.last_login,
         created_at=worker.created_at,
         updated_at=worker.updated_at,
     )
+
+
+async def update_shop_image(admin_id: str, payload: ShopImageUpdate):
+    worker = await Stakeholder.get(PydanticObjectId(admin_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Admin not found")
+    worker.worker_shop_image = payload.worker_shop_image
+    await worker.save()
+    return {"message": "Shop image updated successfully"}
 
 
 async def update_stakeholder(worker_id: str, payload: StakeholderUpdate):
