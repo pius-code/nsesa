@@ -22,7 +22,8 @@ class Transaction(Document):
     customer_number: str | None = None
     customer_email: str | None = None
     payment_mode: str | None = None
-    processed_by: Annotated[str, Indexed()]  # worker ID
+    processed_by: Annotated[str, Indexed()]  # worker name
+    processed_by_id: str | None = None
     status: str = "success"  # success | returned | rejected
     synced_at: datetime | None = None  # None means pending sync from local
     created_at: datetime = datetime.now(timezone.utc)

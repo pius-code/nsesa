@@ -45,10 +45,13 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
             })
 
     # 4. Save the actual transaction document
-    worker = await Stakeholder.find_one(
-        Stakeholder.id == PydanticObjectId(payload.processed_by)
-    )
-    shop_image = worker.worker_shop_image if worker else None
+    try:
+        worker = await Stakeholder.find_one(
+            Stakeholder.id == PydanticObjectId(payload.processed_by_id)
+        ) if payload.processed_by_id else None
+        shop_image = worker.worker_shop_image if worker else None
+    except Exception:
+        shop_image = None
 
     new_id = PydanticObjectId()
     receipt_id = f"{shop_name}_{str(new_id)[-8:].upper()}"
@@ -63,6 +66,7 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         customer_email=payload.customer_email,
         payment_mode=payload.payment_mode,
         processed_by=payload.processed_by,
+        processed_by_id=payload.processed_by_id,
         at_shop=shop_name
     )
     await new_transaction.insert()  # noqa

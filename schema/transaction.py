@@ -17,5 +17,6 @@ class TransactionCreate(BaseModel):
     customer_number: Optional[str] = None
     customer_email: Optional[str] = None
     payment_mode: Optional[str] = None
-    processed_by: str  # worker ID
+    processed_by: str  # worker name
+    processed_by_id: Optional[str] = None
     send_sms: bool = False
