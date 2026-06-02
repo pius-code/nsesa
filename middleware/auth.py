@@ -15,7 +15,6 @@ PUBLIC_PATHS = [
     "/",
     "/docs",
     "/openapi.json",
-    "/api/v1/registerme",
     "/api/v1/login",
 ]
 
@@ -78,9 +77,32 @@ async def admin_protected_route(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format" # noqa
         )
 
-    if not stakeholder or stakeholder.worker_role != "admin":
+    if not stakeholder or stakeholder.worker_role not in ("admin", "super_admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",  # noqa
+        )
+    return sub
+
+
+async def super_admin_protected_route(request: Request):
+    user = await get_current_user(request)
+    sub = user.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated" # noqa
+        )
+    # Fetch user from the database to check their role
+    try:
+        stakeholder = await Stakeholder.get(PydanticObjectId(sub))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format" # noqa
+        )
+
+    if not stakeholder or stakeholder.worker_role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super Admin access required",  # noqa
         )
     return sub

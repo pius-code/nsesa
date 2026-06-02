@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from schema.inventory import InventoryCreate, InventoryUpdate
 from repository.inventory import add_to_shop_inventory, update_stock
-from middleware.auth import admin_protected_route
+from middleware.auth import admin_protected_route, super_admin_protected_route
 from schema.stakeholder import adminStakeholderCreateWorker, ShopImageUpdate
-from repository.stakeholder import create_worker_by_admin, get_workers_by_shop, get_stakeholder_worker_shop_name, update_shop_image # noqa
+from repository.stakeholder import create_worker_by_admin, get_workers_by_shop, get_stakeholder_worker_shop_name, update_shop_image, get_all_shops # noqa
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 
@@ -30,6 +30,16 @@ async def create_worker(payload: adminStakeholderCreateWorker, admin =Depends(ad
 async def add_shop_image(payload: ShopImageUpdate, admin=Depends(admin_protected_route)):  # noqa
     """Update the shop image for the logged-in admin"""
     return await update_shop_image(admin, payload)
+
+
+@router.get("/all_shops")
+async def all_shops(
+    super_admin=Depends(super_admin_protected_route),  # noqa
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    """Super admin only — returns paginated shops with worker counts"""
+    return await get_all_shops(page=page, limit=limit)
 
 
 @router.get("/shop_workers")

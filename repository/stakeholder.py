@@ -2,13 +2,14 @@ from utils.hasher import hashPwd
 from fastapi import HTTPException
 from model.Stakeholder import Stakeholder
 from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse, ShopImageUpdate # noqa
+from beanie.operators import In
 from beanie import PydanticObjectId
 
 
 async def create_stakeholder(payload: StakeholderCreate):
     existing_email = await Stakeholder.find_one(Stakeholder.worker_email == payload.worker_email) # noqa
     if existing_email:
-        raise HTTPException(status_code=400, detail="Worker with this email already exists") # noqa
+        raise HTTPException(status_code=400, detail="Invalid!, try changing the email") # noqa
 
     if payload.worker_role == "admin":
         existing_shop = await Stakeholder.find_one(Stakeholder.worker_shop_name == payload.worker_shop_name) # noqa
@@ -22,6 +23,7 @@ async def create_stakeholder(payload: StakeholderCreate):
         worker_role=payload.worker_role,
         worker_email=payload.worker_email,
         worker_hashed_password=hashPwd(payload.worker_password),
+        worker_shop_image=payload.worker_shop_image,
     )
     await new_worker.insert()
     return {
@@ -37,8 +39,8 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
     if not worker_admin:
         raise HTTPException(status_code=404, detail="Admin not found")
     if existing:
-        raise HTTPException(status_code=400, detail="Worker with this email already exists") # noqa
-    if worker_admin.worker_role != "admin":
+        raise HTTPException(status_code=400, detail="Invalid!, try changing the email!") # noqa
+    if worker_admin.worker_role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Only admins can create workers") # noqa
     new_worker = Stakeholder(
         worker_name=payload.worker_name,
@@ -174,3 +176,44 @@ async def get_stakeholder_worker_shop_name(id: str) -> str | None:
     if stakeholder:
         return stakeholder.worker_shop_name
     return None
+
+
+async def get_all_shops(page: int = 1, limit: int = 10):
+    all_admins = await Stakeholder.find(
+        In(Stakeholder.worker_role, ["admin", "super_admin"])
+    ).sort(Stakeholder.created_at).to_list()
+
+    # deduplicate by shop name — keep the earliest admin per shop
+    seen = set()
+    unique_admins = []
+    for admin in all_admins:
+        if admin.worker_shop_name not in seen:
+            seen.add(admin.worker_shop_name)
+            unique_admins.append(admin)
+
+    total_shops = len(unique_admins)
+    skip = (page - 1) * limit
+    paginated = unique_admins[skip: skip + limit]
+
+    shops = []
+    for admin in paginated:
+        worker_count = await Stakeholder.find(
+            Stakeholder.worker_shop_name == admin.worker_shop_name,
+            Stakeholder.worker_role == "worker",
+        ).count()
+        shops.append({
+            "shop_name": admin.worker_shop_name,
+            "shop_image": admin.worker_shop_image,
+            "admin_name": admin.worker_name,
+            "admin_email": admin.worker_email,
+            "worker_count": worker_count,
+            "created_at": admin.created_at,
+        })
+
+    return {
+        "total_shops": total_shops,
+        "page": page,
+        "limit": limit,
+        "total_pages": -(-total_shops // limit),
+        "shops": shops,
+    }

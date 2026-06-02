@@ -1,15 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from schema.stakeholder import StakeholderCreate, StakeholderLogin, StakeholderResponse # noqa
 from repository.stakeholder import create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password # noqa
 from utils.hasher import verifyPwd
 from helpers.auth import generate_token
+from middleware.auth import super_admin_protected_route
 
 router = APIRouter(prefix="/api/v1", tags=["stakeholder"])
 
 
 @router.post("/registerme")
 async def register_stakeholder(
+
     payload: StakeholderCreate,
+    super_admin=Depends(super_admin_protected_route),
 ):  # noqa
     """Register a new stakeholder account"""
     return await create_stakeholder(payload)  # type: ignore

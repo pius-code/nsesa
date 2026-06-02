@@ -100,6 +100,13 @@ async def get_my_shop_transactions(shop_name: str):
 async def get_transaction_by_receipt_id(receipt_id: str):
     transaction = await Transaction.find_one(Transaction.receipt_id == receipt_id)
     if not transaction:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if not transaction.shop_image:
+        admin = await Stakeholder.find_one(
+            Stakeholder.worker_shop_name == transaction.at_shop
+        )
+        if admin:
+            transaction.shop_image = admin.worker_shop_image
+
     return transaction
