@@ -77,7 +77,7 @@ async def admin_protected_route(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format" # noqa
         )
 
-    if not stakeholder or stakeholder.worker_role not in ("admin", "super_admin"):
+    if not stakeholder or stakeholder.worker_role not in ("admin", "super_admin"): # noqa
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",  # noqa

@@ -23,3 +23,19 @@ def gen_transaction_receipt(
         f"Thank you, {customer_name}!\n"
         f"View receipt: {receipt_url}"
     )
+
+
+def gen_refund_notice(
+    customer_name: str,
+    transaction_id: str,
+    shop_name: str,
+    total_price: float,
+    receipt_url: str,
+) -> str:
+    short_id = transaction_id[-8:].upper()
+    return (
+        f"{shop_name}\n"
+        f"Your purchase (Receipt #{short_id}) of GHS {total_price:.2f} has "
+        f"been refunded, {customer_name}.\n"
+        f"View receipt: {receipt_url}"
+    )

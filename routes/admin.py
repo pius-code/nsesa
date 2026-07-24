@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from schema.inventory import InventoryCreate, InventoryUpdate
-from repository.inventory import add_to_shop_inventory, update_stock
+from repository.inventory import add_to_shop_inventory, update_inventory_item
 from middleware.auth import admin_protected_route, super_admin_protected_route
 from schema.stakeholder import adminStakeholderCreateWorker, ShopImageUpdate
 from repository.stakeholder import create_worker_by_admin, get_workers_by_shop, get_stakeholder_worker_shop_name, update_shop_image, get_all_shops # noqa
@@ -16,8 +16,8 @@ async def add_to_inventory(payload: InventoryCreate, admin =Depends(admin_protec
 
 @router.patch("/inventory/update_stock/{inventory_id}")
 async def restock_inventory(inventory_id: str, payload: InventoryUpdate, admin=Depends(admin_protected_route)):  # noqa
-    """Update stock amount for an inventory item"""
-    return await update_stock(inventory_id, payload.amount_available, admin)  # type: ignore # noqa
+    """Update an inventory item — stock, price, name, SKU, and/or category (any subset)""" # noqa
+    return await update_inventory_item(inventory_id, payload, admin)  # type: ignore # noqa
 
 
 @router.post("/create_worker")

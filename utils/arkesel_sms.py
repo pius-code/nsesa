@@ -1,5 +1,5 @@
 import httpx
-from utils.gen_message_template import gen_transaction_receipt
+from utils.gen_message_template import gen_transaction_receipt, gen_refund_notice
 import os
 from dotenv import load_dotenv
 
@@ -41,3 +41,32 @@ async def send_transaction_receipt_sms(
     async with httpx.AsyncClient() as client:
         response = await client.get(ARKESEL_URL, params=params)
         print(f"[SMS] {phone_number} — {response.text}")
+
+
+async def send_refund_notice_sms(
+    phone_number: str,
+    customer_name: str,
+    transaction_id: str,
+    shop_name: str,
+    total_price: float,
+    receipt_url: str,
+):
+    message = gen_refund_notice(
+        customer_name=customer_name,
+        transaction_id=transaction_id,
+        shop_name=shop_name,
+        total_price=total_price,
+        receipt_url=receipt_url,
+    )
+
+    params = {
+        "action": "send-sms",
+        "api_key": ARKESEL_API_KEY,
+        "from": SMS_SENDER_ID,
+        "to": phone_number.strip(),
+        "sms": message,
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(ARKESEL_URL, params=params)
+        print(f"[SMS] refund notice {phone_number} — {response.text}")
