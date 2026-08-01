@@ -10,6 +10,7 @@ class Stakeholder(Document):
     worker_branch_name: str
     worker_role: str  # "admin" | "worker"
     worker_email: Annotated[str, Indexed(unique=True)]
+    worker_phone: str | None = None
     worker_hashed_password: str
     worker_shop_image: str = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif" # noqa
     is_active: bool = True

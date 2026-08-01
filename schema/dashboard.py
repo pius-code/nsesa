@@ -31,6 +31,10 @@ class DashboardOverview(BaseModel):
     previous_week_revenue: float
     today_refund_count: int
     today_refund_value: float
+    pending_order_count: int
+    pending_order_value: float
+    total_unique_customers: int
+    month_completed_transaction_count: int
     payment_breakdown_today: List[PaymentBreakdownEntry]
     top_products_week: List[TopProductEntry]
     low_stock_items: List[LowStockEntry]

@@ -6,6 +6,8 @@ from routes.inventory import router as inventory_router
 from routes.category import router as category_router
 from routes.client import router as client_router
 from routes.dashboard import router as dashboard_router
+from routes.broadcast import router as broadcast_router
+from routes.shop import router as shop_router
 api_router = APIRouter()
 
 
@@ -16,3 +18,5 @@ api_router.include_router(inventory_router)
 api_router.include_router(category_router)
 api_router.include_router(client_router)
 api_router.include_router(dashboard_router)
+api_router.include_router(broadcast_router)
+api_router.include_router(shop_router)

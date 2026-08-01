@@ -23,6 +23,7 @@ class Transaction(Document):
     customer_email: str | None = None
     client_id: str | None = None
     payment_mode: str | None = None
+    note: str | None = None  # e.g. "no pepper, vegetarian, sugar-free"
     processed_by: Annotated[str, Indexed()]  # worker name
     processed_by_id: str | None = None
     status: str = "success"  # success | returned | rejected

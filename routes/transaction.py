@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, BackgroundTasks, Depends, Query
-from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest # noqa
+from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest, ResendReceiptRequest, CompletePaymentRequest, AddItemsRequest # noqa
 from repository.transaction import (
     save_an_nsesa_transaction,
     get_my_shop_transactions as fetch_shop_transactions,
@@ -9,6 +9,10 @@ from repository.transaction import (
     edit_transaction,
     get_transaction_history,
     get_processed_by_options,
+    resend_receipt,
+    complete_pending_payment,
+    add_items_to_pending_order,
+    cancel_pending_order,
 )
 from middleware.auth import get_current_user, admin_protected_route
 from repository.stakeholder import get_stakeholder_worker_shop_name
@@ -77,3 +81,27 @@ async def list_processed_by_options(request: Request):
     current_user = await get_current_user(request)
     shop_name = await get_stakeholder_worker_shop_name(str(current_user.get("sub"))) # noqa
     return await get_processed_by_options(shop_name)  # type: ignore
+
+
+@router.post("/transactions/{transaction_id}/resend-receipt")
+async def resend_transaction_receipt(transaction_id: str, payload: ResendReceiptRequest, background_tasks: BackgroundTasks, worker=Depends(get_current_user)): # noqa
+    """Any authenticated worker — resend the receipt SMS, optionally correcting the customer's number""" # noqa
+    return await resend_receipt(transaction_id, payload, worker.get("sub"), background_tasks) # type: ignore # noqa
+
+
+@router.post("/transactions/{transaction_id}/complete-payment")
+async def complete_payment(transaction_id: str, payload: CompletePaymentRequest, background_tasks: BackgroundTasks, worker=Depends(get_current_user)): # noqa
+    """Any authenticated worker — record payment on a pending (pay-later) order and send the receipt""" # noqa
+    return await complete_pending_payment(transaction_id, payload, worker.get("sub"), background_tasks) # type: ignore # noqa
+
+
+@router.post("/transactions/{transaction_id}/add-items")
+async def add_items(transaction_id: str, payload: AddItemsRequest, worker=Depends(get_current_user)): # noqa
+    """Any authenticated worker — add more items to an open (pending) tab"""
+    return await add_items_to_pending_order(transaction_id, payload, worker.get("sub")) # type: ignore # noqa
+
+
+@router.post("/transactions/{transaction_id}/cancel")
+async def cancel_order(transaction_id: str, payload: TransactionActionRequest, worker=Depends(get_current_user)): # noqa
+    """Any authenticated worker — cancel a pending order that was never paid, restocking items""" # noqa
+    return await cancel_pending_order(transaction_id, payload, worker.get("sub")) # type: ignore # noqa

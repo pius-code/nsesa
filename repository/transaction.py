@@ -2,12 +2,12 @@
 from fastapi import HTTPException, BackgroundTasks
 from beanie import PydanticObjectId
 from model.Transaction import Transaction, TransactionItem
-from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest # noqa
+from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest, ResendReceiptRequest, CompletePaymentRequest, AddItemsRequest # noqa
 from model.Inventory import Inventory
 from model.Stakeholder import Stakeholder
 from model.Client import Client
 from beanie.operators import Or
-from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms
+from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
 from datetime import datetime, timedelta, timezone
 import os
@@ -72,7 +72,11 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         customer_email = customer_email or client.client_email
 
     new_id = PydanticObjectId()
-    receipt_id = f"{shop_name}_{str(new_id)[-8:].upper()}"
+    # Hyphen, not underscore: underscore isn't in the GSM-7 default SMS
+    # alphabet, so it needs an escape sequence to send over SMS — some
+    # phones/gateways mis-render that escape as literal characters (e.g.
+    # "%11") when the link is tapped from a text message, breaking the URL. # noqa
+    receipt_id = f"{shop_name}-{str(new_id)[-8:].upper()}"
     new_transaction = Transaction(
         id=new_id,
         receipt_id=receipt_id,
@@ -83,14 +87,18 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         customer_number=customer_number,
         customer_email=customer_email,
         client_id=payload.client_id,
-        payment_mode=payload.payment_mode,
+        payment_mode=None if payload.pay_later else payload.payment_mode,
+        status="pending" if payload.pay_later else "success",
+        note=payload.note,
         processed_by=payload.processed_by,
         processed_by_id=payload.processed_by_id,
         at_shop=shop_name
     )
     await new_transaction.insert()  # noqa
 
-    if payload.send_sms and new_transaction.customer_number and background_tasks: # noqa
+    # Pending (pay-later) orders haven't been paid yet — no receipt SMS until # noqa
+    # payment is actually completed.
+    if not payload.pay_later and payload.send_sms and new_transaction.customer_number and background_tasks: # noqa
         receipt_url = f"{FRONTEND_URL}/receipts/{new_transaction.receipt_id}"
         background_tasks.add_task(
             send_transaction_receipt_sms,
@@ -279,7 +287,7 @@ async def edit_transaction(transaction_id: str, payload: TransactionEditRequest,
 
     changes: dict = {}
 
-    for field in ("customer_name", "customer_number", "customer_email", "payment_mode"): # noqa
+    for field in ("customer_name", "customer_number", "customer_email", "payment_mode", "note"): # noqa
         new_value = getattr(payload, field)
         if new_value is not None and new_value != getattr(transaction, field):
             changes[field] = {"old": getattr(transaction, field), "new": new_value} # noqa
@@ -345,3 +353,158 @@ async def get_transaction_history(transaction_id: str, admin_id: str):
     admin = await _get_admin_and_shop(admin_id)
     await _get_transaction_in_shop(transaction_id, admin.worker_shop_name)
     return await get_transaction_audit_log(transaction_id, admin.worker_shop_name) # noqa
+
+
+async def resend_receipt(
+    transaction_id: str,
+    payload: ResendReceiptRequest,
+    worker_id: str,
+    background_tasks: BackgroundTasks,
+):
+    worker = await _get_admin_and_shop(worker_id)
+    transaction = await _get_transaction_in_shop(transaction_id, worker.worker_shop_name) # noqa
+
+    if not transaction.receipt_id:
+        raise HTTPException(status_code=400, detail="This transaction has no receipt to send") # noqa
+
+    number_changed = transaction.customer_number != payload.customer_number
+    if number_changed:
+        transaction.customer_number = payload.customer_number
+        await transaction.save()
+
+    receipt_url = f"{FRONTEND_URL}/receipts/{transaction.receipt_id}"
+    background_tasks.add_task(
+        send_transaction_receipt_sms,
+        phone_number=payload.customer_number,
+        customer_name=transaction.customer_name,
+        transaction_id=str(transaction.id),
+        shop_name=worker.worker_shop_name,
+        total_price=transaction.total_price,
+        items=[item.model_dump() for item in transaction.items],
+        receipt_url=receipt_url,
+        payment_mode=transaction.payment_mode,
+    )
+
+    await log_transaction_action(
+        transaction_id=str(transaction.id),
+        action="receipt_resent",
+        performed_by=worker_id,
+        performed_by_name=worker.worker_name,
+        reason=(
+            f"Resent to {payload.customer_number}"
+            + (" (number corrected)" if number_changed else "")
+        ),
+        at_shop=worker.worker_shop_name,
+    )
+
+    return {"message": "Receipt resent successfully"}
+
+
+async def complete_pending_payment(
+    transaction_id: str,
+    payload: CompletePaymentRequest,
+    worker_id: str,
+    background_tasks: BackgroundTasks | None,
+):
+    worker = await _get_admin_and_shop(worker_id)
+    transaction = await _get_transaction_in_shop(transaction_id, worker.worker_shop_name) # noqa
+
+    if transaction.status != "pending":
+        raise HTTPException(status_code=400, detail="This order is not pending payment") # noqa
+
+    transaction.status = "success"
+    transaction.payment_mode = payload.payment_mode
+    await transaction.save()
+
+    await log_transaction_action(
+        transaction_id=str(transaction.id),
+        action="payment_completed",
+        performed_by=worker_id,
+        performed_by_name=worker.worker_name,
+        reason=f"Paid via {payload.payment_mode}",
+        at_shop=worker.worker_shop_name,
+    )
+
+    if payload.send_sms and transaction.customer_number and transaction.receipt_id and background_tasks: # noqa
+        receipt_url = f"{FRONTEND_URL}/receipts/{transaction.receipt_id}"
+        background_tasks.add_task(
+            send_transaction_receipt_sms,
+            phone_number=transaction.customer_number,
+            customer_name=transaction.customer_name,
+            transaction_id=str(transaction.id),
+            shop_name=worker.worker_shop_name,
+            total_price=transaction.total_price,
+            items=[item.model_dump() for item in transaction.items],
+            receipt_url=receipt_url,
+            payment_mode=transaction.payment_mode,
+        )
+
+    return {"message": "Payment recorded successfully", "transaction": transaction} # noqa
+
+
+async def add_items_to_pending_order(transaction_id: str, payload: AddItemsRequest, worker_id: str): # noqa
+    worker = await _get_admin_and_shop(worker_id)
+    transaction = await _get_transaction_in_shop(transaction_id, worker.worker_shop_name) # noqa
+
+    if transaction.status != "pending":
+        raise HTTPException(status_code=400, detail="Can only add items to a pending order") # noqa
+
+    inventory_map: dict[str, Inventory] = {}
+    for item in payload.items:
+        inv = await Inventory.get(PydanticObjectId(item.product_id))
+        if not inv:
+            raise HTTPException(status_code=404, detail=f"Product '{item.product_name}' not found") # noqa
+        if inv.amount_available < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough stock for '{item.product_name}'. Only {inv.amount_available} available.", # noqa
+            )
+        inventory_map[item.product_id] = inv
+
+    for item in payload.items:
+        inv = inventory_map[item.product_id]
+        await inv.inc({Inventory.amount_available: -item.quantity})  # noqa
+        new_amount = inv.amount_available - item.quantity
+        if new_amount <= 0:
+            await inv.set({Inventory.is_available: False, Inventory.amount_available: 0}) # noqa
+
+    items_by_id = {i.product_id: i for i in transaction.items}
+    for new_item in payload.items:
+        existing = items_by_id.get(new_item.product_id)
+        if existing:
+            existing.quantity += new_item.quantity
+            existing.subtotal += new_item.subtotal
+        else:
+            transaction.items.append(TransactionItem(**new_item.model_dump())) # noqa
+            items_by_id[new_item.product_id] = transaction.items[-1]
+
+    transaction.total_price = sum(i.subtotal for i in transaction.items)
+    if payload.note is not None:
+        transaction.note = payload.note
+    await transaction.save()
+    return {"message": "Items added successfully", "transaction": transaction}
+
+
+async def cancel_pending_order(transaction_id: str, payload: TransactionActionRequest, worker_id: str): # noqa
+    worker = await _get_admin_and_shop(worker_id)
+    transaction = await _get_transaction_in_shop(transaction_id, worker.worker_shop_name) # noqa
+
+    if transaction.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Only pending orders can be cancelled this way — use delete for completed transactions", # noqa
+        )
+
+    await _restock_items(transaction.items)
+    transaction.is_deleted = True
+    await transaction.save()
+
+    await log_transaction_action(
+        transaction_id=str(transaction.id),
+        action="cancelled",
+        performed_by=worker_id,
+        performed_by_name=worker.worker_name,
+        reason=payload.reason,
+        at_shop=worker.worker_shop_name,
+    )
+    return {"message": "Order cancelled successfully"}

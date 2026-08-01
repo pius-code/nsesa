@@ -9,11 +9,11 @@ import csv
 import io
 
 
-async def _resolve_category(category_id: str | None) -> Category | None:
+async def _resolve_category(category_id: str | None, shop_name: str) -> Category | None: # noqa
     if not category_id:
         return None
     category = await Category.get(PydanticObjectId(category_id))
-    if not category or category.is_deleted:
+    if not category or category.is_deleted or category.worker_shop_name != shop_name: # noqa
         raise HTTPException(status_code=404, detail="Category not found")
     return category
 
@@ -24,7 +24,7 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
         return {"message": "Unauthorized to add inventory items"}  # noqa
     worker_admin_shop_name = worker_admin.worker_shop_name
 
-    category = await _resolve_category(payload.category_id)
+    category = await _resolve_category(payload.category_id, worker_admin_shop_name) # noqa
 
     new_inventory_item = Inventory(
         product_name=payload.product_name,
@@ -69,7 +69,7 @@ async def update_inventory_item(inventory_id: str, payload: InventoryUpdate, adm
     update_data = payload.model_dump(exclude_none=True)
 
     if "category_id" in update_data:
-        category = await _resolve_category(update_data.pop("category_id"))
+        category = await _resolve_category(update_data.pop("category_id"), admin_record.worker_shop_name) # noqa
         item.category_id = str(category.id) if category else None
         item.category_name = category.name if category else None
 
@@ -124,7 +124,10 @@ async def bulk_import_inventory(file_bytes: bytes, admin: str) -> BulkImportResp
             detail=f"CSV must include columns: {', '.join(sorted(REQUIRED_BULK_COLUMNS))} (optional: sku, category)", # noqa
         )
 
-    categories = await Category.find(Category.is_deleted == False).to_list() # noqa
+    categories = await Category.find(
+        Category.worker_shop_name == worker_admin.worker_shop_name,
+        Category.is_deleted == False, # noqa
+    ).to_list()
     category_by_name = {c.name.strip().lower(): c for c in categories}
 
     results: list[BulkImportRowResult] = []

@@ -111,6 +111,34 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list() # noqa
         refund_value = sum(t.total_price for t in refunded_txs)
 
+    # cancelled pending orders are soft-deleted but keep status="pending", so
+    # NOT_DELETED must be applied here too or cancelled tabs would still count # noqa
+    pending_pipeline = [
+        {"$match": {"at_shop": shop_name, "status": "pending", **NOT_DELETED}},
+        {"$group": {"_id": None, "value": {"$sum": "$total_price"}, "count": {"$sum": 1}}}, # noqa
+    ]
+    pending_result = await _run_aggregation(pending_pipeline)
+    pending_count = pending_result[0]["count"] if pending_result else 0
+    pending_value = pending_result[0]["value"] if pending_result else 0.0
+
+    # Unique customers by name, excluding the "customer" placeholder used for
+    # walk-ins who didn't give a name.
+    names = await Transaction.get_pymongo_collection().distinct(
+        "customer_name", {"at_shop": shop_name, **NOT_DELETED}
+    )
+    unique_customers = {n.strip().lower() for n in names if n and n.strip().lower() != "customer"} # noqa
+
+    month_start = today_start.replace(day=1)
+    month_pipeline = [
+        {"$match": {
+            "at_shop": shop_name, "status": {"$ne": "pending"},
+            "created_at": {"$gte": month_start}, **NOT_DELETED,
+        }},
+        {"$count": "count"},
+    ]
+    month_result = await _run_aggregation(month_pipeline)
+    month_completed_count = month_result[0]["count"] if month_result else 0
+
     low_stock = await Inventory.find(
         Inventory.worker_shop_name == shop_name,
         Inventory.is_deleted == False, # noqa
@@ -127,6 +155,10 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         previous_week_revenue=previous_week_revenue,
         today_refund_count=len(refund_entries),
         today_refund_value=refund_value,
+        pending_order_count=pending_count,
+        pending_order_value=pending_value,
+        total_unique_customers=len(unique_customers),
+        month_completed_transaction_count=month_completed_count,
         payment_breakdown_today=payment_breakdown, # type: ignore
         top_products_week=top_products, # type: ignore
         low_stock_items=[

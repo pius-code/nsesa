@@ -1,9 +1,27 @@
 from utils.hasher import hashPwd
 from fastapi import HTTPException
 from model.Stakeholder import Stakeholder
+from model.Shop import Shop
 from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse, ShopImageUpdate # noqa
 from beanie.operators import In
 from beanie import PydanticObjectId
+
+
+def _to_response(w: Stakeholder) -> StakeholderResponse:
+    return StakeholderResponse(
+        id=str(w.id),
+        worker_name=w.worker_name,
+        worker_shop_name=w.worker_shop_name,
+        worker_branch_name=w.worker_branch_name,
+        worker_role=w.worker_role,
+        worker_email=w.worker_email,
+        worker_phone=w.worker_phone,
+        worker_shop_image=w.worker_shop_image,
+        is_active=w.is_active,
+        last_login=w.last_login,
+        created_at=w.created_at,
+        updated_at=w.updated_at,
+    )
 
 
 async def create_stakeholder(payload: StakeholderCreate):
@@ -22,10 +40,17 @@ async def create_stakeholder(payload: StakeholderCreate):
         worker_branch_name=payload.worker_branch_name,
         worker_role=payload.worker_role,
         worker_email=payload.worker_email,
+        worker_phone=payload.worker_phone,
         worker_hashed_password=hashPwd(payload.worker_password),
         worker_shop_image=payload.worker_shop_image,
     )
     await new_worker.insert()
+
+    if payload.worker_role == "admin":
+        existing_shop_doc = await Shop.find_one(Shop.name == payload.worker_shop_name) # noqa
+        if not existing_shop_doc:
+            await Shop(name=payload.worker_shop_name).insert()
+
     return {
         "message": "Worker created successfully",
         "worker": str(new_worker.id),
@@ -33,7 +58,6 @@ async def create_stakeholder(payload: StakeholderCreate):
 
 
 async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: str): # noqa
-    print(admin) # noqa
     existing = await Stakeholder.find_one(Stakeholder.worker_email == payload.worker_email) # noqa
     worker_admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin)) # noqa
     if not worker_admin:
@@ -48,84 +72,31 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
         worker_branch_name=worker_admin.worker_branch_name, # noqa
         worker_role=payload.worker_role,
         worker_email=payload.worker_email,
+        worker_phone=payload.worker_phone,
         worker_hashed_password=hashPwd(payload.worker_password),
     )
     await new_worker.insert()
     return {
         "message": "Worker created successfully",
-        "worker": StakeholderResponse(
-            id=str(new_worker.id),
-            worker_name=new_worker.worker_name,
-            worker_shop_name=new_worker.worker_shop_name,
-            worker_branch_name=new_worker.worker_branch_name,
-            worker_role=new_worker.worker_role,
-            worker_email=new_worker.worker_email,
-            worker_shop_image=new_worker.worker_shop_image,
-            is_active=new_worker.is_active,
-            last_login=new_worker.last_login,
-            created_at=new_worker.created_at,
-            updated_at=new_worker.updated_at,
-        )
+        "worker": _to_response(new_worker),
     }
 
 
 async def get_workers_by_shop(shop_name: str):
     workers = await Stakeholder.find(Stakeholder.worker_shop_name == shop_name).to_list() # noqa
-    return [
-        StakeholderResponse(
-            id=str(w.id),
-            worker_name=w.worker_name,
-            worker_shop_name=w.worker_shop_name,
-            worker_branch_name=w.worker_branch_name,
-            worker_role=w.worker_role,
-            worker_email=w.worker_email,
-            worker_shop_image=w.worker_shop_image,
-            is_active=w.is_active,
-            last_login=w.last_login,
-            created_at=w.created_at,
-            updated_at=w.updated_at,
-        )
-        for w in workers
-    ]
+    return [_to_response(w) for w in workers]
 
 
 async def get_all_stakeholders():
     workers = await Stakeholder.find_all().to_list()
-    return [
-        StakeholderResponse(
-            id=str(w.id),
-            worker_name=w.worker_name,
-            worker_shop_name=w.worker_shop_name,
-            worker_branch_name=w.worker_branch_name,
-            worker_role=w.worker_role,
-            worker_email=w.worker_email,
-            worker_shop_image=w.worker_shop_image,
-            is_active=w.is_active,
-            last_login=w.last_login,
-            created_at=w.created_at,
-            updated_at=w.updated_at,
-        )
-        for w in workers
-    ]
+    return [_to_response(w) for w in workers]
 
 
 async def get_stakeholder_by_id(worker_id: str):
     worker = await Stakeholder.get(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
-    return StakeholderResponse(
-        id=str(worker.id),
-        worker_name=worker.worker_name,
-        worker_shop_name=worker.worker_shop_name,
-        worker_branch_name=worker.worker_branch_name,
-        worker_role=worker.worker_role,
-        worker_email=worker.worker_email,
-        worker_shop_image=worker.worker_shop_image,
-        is_active=worker.is_active,
-        last_login=worker.last_login,
-        created_at=worker.created_at,
-        updated_at=worker.updated_at,
-    )
+    return _to_response(worker)
 
 
 async def update_shop_image(admin_id: str, payload: ShopImageUpdate):
@@ -201,13 +172,17 @@ async def get_all_shops(page: int = 1, limit: int = 10):
             Stakeholder.worker_shop_name == admin.worker_shop_name,
             Stakeholder.worker_role == "worker",
         ).count()
+        shop_doc = await Shop.find_one(Shop.name == admin.worker_shop_name)
         shops.append({
             "shop_name": admin.worker_shop_name,
             "shop_image": admin.worker_shop_image,
             "admin_name": admin.worker_name,
             "admin_email": admin.worker_email,
+            "admin_phone": admin.worker_phone,
             "worker_count": worker_count,
             "created_at": admin.created_at,
+            "status": shop_doc.status if shop_doc else "active",
+            "status_reason": shop_doc.status_reason if shop_doc else None,
         })
 
     return {

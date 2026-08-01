@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from schema.stakeholder import StakeholderCreate, StakeholderLogin, StakeholderResponse # noqa
 from repository.stakeholder import create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password # noqa
+from repository.shop import get_shop_status
 from utils.hasher import verifyPwd
 from helpers.auth import generate_token
 from middleware.auth import super_admin_protected_route
@@ -27,6 +28,15 @@ async def login_stakeholder(payload: StakeholderLogin):
     hashed_password = await get_stakeholder_hashed_password(payload.worker_email) # noqa
     if not verifyPwd(payload.worker_password, str(hashed_password)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    shop = await get_shop_status(stakeholder.worker_shop_name)
+    if shop and shop.status != "active":
+        verb = "deleted" if shop.status == "deleted" else "suspended"
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your shop has been {verb}. Please contact the administrator.", # noqa
+        )
+
     token = generate_token(str(stakeholder.id))
     return {
         "access_token": token,
@@ -38,6 +48,7 @@ async def login_stakeholder(payload: StakeholderLogin):
             worker_branch_name=stakeholder.worker_branch_name,
             worker_role=stakeholder.worker_role,
             worker_email=stakeholder.worker_email,
+            worker_phone=stakeholder.worker_phone,
             worker_shop_image=stakeholder.worker_shop_image,
             is_active=stakeholder.is_active,
             last_login=stakeholder.last_login,

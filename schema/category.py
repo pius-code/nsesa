@@ -17,6 +17,7 @@ class CategoryResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    worker_shop_name: str
     created_by: str
     created_at: datetime
     updated_at: datetime
