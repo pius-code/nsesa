@@ -11,8 +11,18 @@ from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_s
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
 from datetime import datetime, timedelta, timezone
 import os
+import re
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+
+def _slugify_shop_name(shop_name: str) -> str:
+    # Shop names are free text (spaces, apostrophes, "&", etc.) but this
+    # becomes a literal URL path segment for the receipt link — anything
+    # that isn't alphanumeric collapses to a single hyphen so the link
+    # never breaks, whether it's clicked in a browser or tapped from an SMS. # noqa
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", shop_name).strip("-")
+    return slug.lower() or "shop"
 
 
 async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, background_tasks: BackgroundTasks = None): # noqa
@@ -76,7 +86,7 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
     # alphabet, so it needs an escape sequence to send over SMS — some
     # phones/gateways mis-render that escape as literal characters (e.g.
     # "%11") when the link is tapped from a text message, breaking the URL. # noqa
-    receipt_id = f"{shop_name}-{str(new_id)[-8:].upper()}"
+    receipt_id = f"{_slugify_shop_name(shop_name)}-{str(new_id)[-8:].upper()}" # noqa
     new_transaction = Transaction(
         id=new_id,
         receipt_id=receipt_id,
