@@ -25,7 +25,7 @@ async def generate_paystack_link_for_voting(
             f"Internship application with tracking ID {tracking_id} not found"
         )
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         body = {
             "reference": reference,
             "amount": normalized_amount,
