@@ -6,7 +6,7 @@ from schema.transaction import TransactionCreate, TransactionActionRequest, Tran
 from model.Inventory import Inventory
 from model.Stakeholder import Stakeholder
 from model.Client import Client
-from beanie.operators import Or
+from beanie.operators import Or, In
 from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
 from datetime import datetime, timedelta, timezone
@@ -59,11 +59,18 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
             })
 
     # 4. Save the actual transaction document
+    shop_image = None
     try:
-        worker = await Stakeholder.find_one(
-            Stakeholder.id == PydanticObjectId(payload.processed_by_id)
-        ) if payload.processed_by_id else None
-        shop_image = worker.worker_shop_image if worker else None
+        admin = await Stakeholder.find_one(
+            Stakeholder.worker_shop_name == shop_name,
+            In(Stakeholder.worker_role, ["admin", "super_admin"]),
+        )
+        if admin and admin.worker_shop_image:
+            shop_image = admin.worker_shop_image
+        elif payload.processed_by_id:
+            worker = await Stakeholder.get(PydanticObjectId(payload.processed_by_id))
+            if worker:
+                shop_image = worker.worker_shop_image
     except Exception:
         shop_image = None
 
@@ -190,11 +197,13 @@ async def get_transaction_by_receipt_id(receipt_id: str):
     if not transaction:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    if not transaction.shop_image:
+    DEFAULT_FALLBACK = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif"
+    if not transaction.shop_image or transaction.shop_image == DEFAULT_FALLBACK:
         admin = await Stakeholder.find_one(
-            Stakeholder.worker_shop_name == transaction.at_shop
+            Stakeholder.worker_shop_name == transaction.at_shop,
+            In(Stakeholder.worker_role, ["admin", "super_admin"]),
         )
-        if admin:
+        if admin and admin.worker_shop_image:
             transaction.shop_image = admin.worker_shop_image
 
     return transaction

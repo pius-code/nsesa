@@ -68,12 +68,13 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
         raise HTTPException(status_code=403, detail="Only admins can create workers") # noqa
     new_worker = Stakeholder(
         worker_name=payload.worker_name,
-        worker_shop_name=worker_admin.worker_shop_name, # noqa
-        worker_branch_name=worker_admin.worker_branch_name, # noqa
+        worker_shop_name=worker_admin.worker_shop_name,  # noqa
+        worker_branch_name=worker_admin.worker_branch_name,  # noqa
         worker_role=payload.worker_role,
         worker_email=payload.worker_email,
         worker_phone=payload.worker_phone,
         worker_hashed_password=hashPwd(payload.worker_password),
+        worker_shop_image=worker_admin.worker_shop_image,
     )
     await new_worker.insert()
     return {
@@ -105,6 +106,12 @@ async def update_shop_image(admin_id: str, payload: ShopImageUpdate):
         raise HTTPException(status_code=404, detail="Admin not found")
     worker.worker_shop_image = payload.worker_shop_image
     await worker.save()
+
+    # Sync worker_shop_image to all workers in this shop
+    await Stakeholder.find(
+        Stakeholder.worker_shop_name == worker.worker_shop_name
+    ).set({Stakeholder.worker_shop_image: payload.worker_shop_image})
+
     return {"message": "Shop image updated successfully"}
 
 
