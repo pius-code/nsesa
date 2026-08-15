@@ -94,12 +94,20 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
     # phones/gateways mis-render that escape as literal characters (e.g.
     # "%11") when the link is tapped from a text message, breaking the URL. # noqa
     receipt_id = f"{_slugify_shop_name(shop_name)}-{str(new_id)[-8:].upper()}" # noqa
+    tx_items = []
+    for item in payload.items:
+        inv_record = inventory_items_map.get(item.product_id)
+        cost = item.unit_cost if (item.unit_cost and item.unit_cost > 0) else (inv_record.cost_price if inv_record else 0.0)
+        item_data = item.model_dump()
+        item_data["unit_cost"] = cost
+        tx_items.append(TransactionItem(**item_data))
+
     new_transaction = Transaction(
         id=new_id,
         receipt_id=receipt_id,
         shop_image=shop_image,
         customer_name=customer_name,
-        items=[TransactionItem(**item.model_dump()) for item in payload.items],  # noqa
+        items=tx_items,
         total_price=payload.total_price,
         customer_number=customer_number,
         customer_email=customer_email,

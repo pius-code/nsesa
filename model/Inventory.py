@@ -7,11 +7,14 @@ from pymongo import ASCENDING, IndexModel
 class Inventory(Document):
     product_name: Annotated[str, Indexed()]
     product_price: float
+    cost_price: float = 0.0
     amount_available: int
     worker_shop_name: Annotated[str, Indexed()]
     sku: str | None = None  # SKU / barcode, unique per shop when set
     category_id: str | None = None
     category_name: str | None = None
+    supplier_name: str | None = None
+    supplier_contact: str | None = None
     is_available: bool = True  # flips to False when amount_available hits 0
     created_at: datetime = datetime.now(timezone.utc)
     updated_at: datetime = datetime.now(timezone.utc)

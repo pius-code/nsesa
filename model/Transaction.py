@@ -9,6 +9,7 @@ class TransactionItem(BaseModel):
     product_id: str
     product_name: str
     unit_price: float
+    unit_cost: float = 0.0
     quantity: int
     subtotal: float
 

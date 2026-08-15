@@ -29,12 +29,15 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
     new_inventory_item = Inventory(
         product_name=payload.product_name,
         product_price=payload.product_price,
+        cost_price=payload.cost_price or 0.0,
         amount_available=payload.amount_available,
         sku=payload.sku or None,
         created_by=admin,
         worker_shop_name=worker_admin_shop_name,
         category_id=str(category.id) if category else None,
         category_name=category.name if category else None,
+        supplier_name=payload.supplier_name or None,
+        supplier_contact=payload.supplier_contact or None,
     )
     try:
         await new_inventory_item.insert()
