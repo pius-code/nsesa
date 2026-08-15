@@ -206,7 +206,7 @@ async def get_transaction_by_receipt_id(receipt_id: str):
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     DEFAULT_FALLBACK = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif"
-    if not transaction.shop_image or transaction.shop_image == DEFAULT_FALLBACK:
+    if not transaction.shop_image or transaction.shop_image == DEFAULT_FALLBACK: # noqa
         admin = await Stakeholder.find_one(
             Stakeholder.worker_shop_name == transaction.at_shop,
             In(Stakeholder.worker_role, ["admin", "super_admin"]),
