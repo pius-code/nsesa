@@ -120,33 +120,22 @@ async def get_current_stakeholder(request: Request) -> Stakeholder:
 
 def require_roles(allowed_roles: list[str]):
     """Role-based access control dependency"""
+    normalized_allowed = {normalize_role(role) for role in allowed_roles}
+
     async def role_checker(stakeholder: Stakeholder = Depends(get_current_stakeholder)):
         effective_role = normalize_role(stakeholder.worker_role)
 
-        if stakeholder.worker_role == "super_admin":
+        if effective_role == "super_admin":
             return stakeholder
 
-        if effective_role in {"owner", "manager", "cashier", "accountant"} and effective_role in allowed_roles:
+        if effective_role in normalized_allowed:
             return stakeholder
 
-        if effective_role == "owner" and "owner" in allowed_roles:
-            return stakeholder
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied. Requires one of roles: {', '.join(allowed_roles)}",
+        )
 
-        if effective_role == "manager" and "manager" in allowed_roles:
-            return stakeholder
-
-        if effective_role == "cashier" and "cashier" in allowed_roles:
-            return stakeholder
-
-        if effective_role == "accountant" and "accountant" in allowed_roles:
-            return stakeholder
-
-        if effective_role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Requires one of roles: {', '.join(allowed_roles)}",
-            )
-        return stakeholder
     return role_checker
 
 

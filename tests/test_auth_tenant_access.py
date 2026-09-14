@@ -1,9 +1,10 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from middleware.auth import ensure_same_shop, normalize_role
+from middleware.auth import ensure_same_shop, normalize_role, require_roles
 
 
 def test_matching_shop_is_allowed():
@@ -23,3 +24,15 @@ def test_role_aliases_are_normalized():
     assert normalize_role("admin") == "owner"
     assert normalize_role("inventory_manager") == "manager"
     assert normalize_role("cashier") == "cashier"
+
+
+def test_require_roles_accepts_alias_values():
+    stakeholder = SimpleNamespace(worker_role="admin")
+
+    async def fake_get_current_stakeholder():
+        return stakeholder
+
+    checker = require_roles(["admin", "manager"])
+    result = asyncio.run(checker(stakeholder=stakeholder))
+
+    assert result is stakeholder
