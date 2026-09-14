@@ -584,7 +584,14 @@ async def cancel_pending_order(transaction_id: str, payload: TransactionActionRe
             detail="Only pending orders can be cancelled this way — use delete for completed transactions", # noqa
         )
 
-    await _restock_items(transaction.items)
+    await _restock_items(
+        items=transaction.items,
+        shop_name=worker.worker_shop_name,
+        user_id=worker_id,
+        user_name=worker.worker_name,
+        movement_type="RESTOCK",
+        reason=f"Pending order cancelled: {payload.reason}",
+    )
     transaction.is_deleted = True
     await transaction.save()
 
