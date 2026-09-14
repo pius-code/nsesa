@@ -2,7 +2,15 @@
 from fastapi import HTTPException, BackgroundTasks
 from beanie import PydanticObjectId
 from model.Transaction import Transaction, TransactionItem
-from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest, ResendReceiptRequest, CompletePaymentRequest, AddItemsRequest # noqa
+from schema.transaction import (
+    TransactionCreate,
+    TransactionItemCreate,
+    TransactionActionRequest,
+    TransactionEditRequest,
+    ResendReceiptRequest,
+    CompletePaymentRequest,
+    AddItemsRequest,
+)  # noqa
 from model.Inventory import Inventory
 from model.Stakeholder import Stakeholder
 from model.Client import Client
@@ -53,11 +61,11 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         inv_item_record = inventory_items_map[item.product_id]
         prev_qty = inv_item_record.amount_available
         new_amount = prev_qty - item.quantity
-        await inv_item_record.inc({Inventory.amount_available: -item.quantity})  # noqa
+        await inv_item_record.inc({"amount_available": -item.quantity})  # noqa
         if new_amount <= 0:
             await inv_item_record.set({  # noqa
-                Inventory.is_available: False,
-                Inventory.amount_available: 0
+                "is_available": False,
+                "amount_available": 0
             })
         # Record in stock movement ledger
         try:
@@ -269,9 +277,9 @@ async def _restock_items(
             continue
         prev_qty = inv.amount_available
         new_qty = prev_qty + item.quantity
-        await inv.inc({Inventory.amount_available: item.quantity})  # noqa
+        await inv.inc({"amount_available": item.quantity})  # noqa
         if not inv.is_available:
-            await inv.set({Inventory.is_available: True})  # noqa
+            await inv.set({"is_available": True})  # noqa
         try:
             await StockMovementService.record_movement(
                 product_id=str(inv.id),
@@ -406,12 +414,12 @@ async def edit_transaction(transaction_id: str, payload: TransactionEditRequest,
 
         for product_id, delta in deltas.items():
             inv = inventory_cache[product_id]
-            await inv.inc({Inventory.amount_available: -delta})  # noqa
+            await inv.inc({"amount_available": -delta})  # noqa
             new_amount = inv.amount_available - delta
             if new_amount <= 0:
-                await inv.set({Inventory.is_available: False, Inventory.amount_available: 0}) # noqa
+                await inv.set({"is_available": False, "amount_available": 0}) # noqa
             elif not inv.is_available:
-                await inv.set({Inventory.is_available: True})  # noqa
+                await inv.set({"is_available": True})  # noqa
 
         new_total = sum(i.subtotal for i in payload.items)
         changes["items"] = {
@@ -552,10 +560,10 @@ async def add_items_to_pending_order(transaction_id: str, payload: AddItemsReque
 
     for item in payload.items:
         inv = inventory_map[item.product_id]
-        await inv.inc({Inventory.amount_available: -item.quantity})  # noqa
+        await inv.inc({"amount_available": -item.quantity})  # noqa
         new_amount = inv.amount_available - item.quantity
         if new_amount <= 0:
-            await inv.set({Inventory.is_available: False, Inventory.amount_available: 0}) # noqa
+            await inv.set({"is_available": False, "amount_available": 0}) # noqa
 
     items_by_id = {i.product_id: i for i in transaction.items}
     for new_item in payload.items:
