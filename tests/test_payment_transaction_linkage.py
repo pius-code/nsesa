@@ -2,6 +2,8 @@ import asyncio
 from types import SimpleNamespace
 
 from repository import transaction as tx_repo
+from repository.payment import PaymentService
+from schema.payment import PaymentReconcileRequest
 
 
 def test_save_an_nsesa_transaction_links_payment_and_receipt(monkeypatch):
@@ -165,3 +167,64 @@ def test_complete_pending_payment_creates_payment_reference_and_receipt_metadata
     assert captured["payload"].transaction_id == "tx-pending-1"
     assert captured["payload"].receipt_id == "nimble-ABC123"
     assert captured["payload"].amount == 180.0
+
+
+def test_reconcile_payment_updates_the_linked_transaction(monkeypatch):
+    class FakePayment:
+        def __init__(self):
+            self.id = "pay-abc"
+            self.payment_reference = "FJPAY-REC1"
+            self.transaction_id = "tx-123"
+            self.receipt_id = "nimble-REC1"
+            self.amount = 120.0
+            self.shop_name = "Nimble Mart"
+            self.payment_mode = "BANK_TRANSFER"
+            self.status = "PENDING"
+            self.metadata = {}
+            self.failure_reason = None
+
+        async def save(self):
+            return None
+
+    class FakeTransaction:
+        def __init__(self):
+            self.id = "tx-123"
+            self.status = "pending"
+            self.payment_id = None
+            self.payment_reference = None
+            self.payment_mode = None
+            self.receipt_id = "nimble-REC1"
+            self.at_shop = "Nimble Mart"
+
+        async def save(self):
+            return None
+
+    payment = FakePayment()
+    transaction = FakeTransaction()
+
+    async def _fake_find_one(*args, **kwargs):
+        return payment
+
+    async def _fake_transaction_get(_id):
+        return transaction
+
+    monkeypatch.setattr("repository.payment.Payment.find_one", _fake_find_one)
+    monkeypatch.setattr("repository.payment.Transaction.get", _fake_transaction_get)
+
+    result = asyncio.run(
+        PaymentService.reconcile_payment(
+            PaymentReconcileRequest(
+                payment_reference="FJPAY-REC1",
+                action="APPROVE",
+                reason="Bank proof received",
+            ),
+            shop_name="Nimble Mart",
+            user_name="Jane",
+        )
+    )
+
+    assert result.status == "SUCCESS"
+    assert transaction.status == "success"
+    assert transaction.payment_reference == "FJPAY-REC1"
+    assert transaction.payment_mode == "BANK_TRANSFER"
+    assert transaction.payment_id == "pay-abc"
