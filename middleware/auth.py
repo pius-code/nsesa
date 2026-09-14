@@ -16,6 +16,32 @@ PUBLIC_PATHS = [
     "/api/v1/onboarding",
 ]
 
+ROLE_ALIASES = {
+    "admin": "owner",
+    "owner": "owner",
+    "manager": "manager",
+    "inventory_manager": "manager",
+    "cashier": "cashier",
+    "accountant": "accountant",
+    "super_admin": "super_admin",
+}
+
+
+def normalize_role(role: str | None) -> str:
+    if not role:
+        return "worker"
+    return ROLE_ALIASES.get(role.lower(), role.lower())
+
+
+def ensure_same_shop(stakeholder: Stakeholder, shop_name: str) -> None:
+    if not shop_name:
+        return
+    if stakeholder.worker_shop_name != shop_name:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="tenant access denied: this user cannot access records from another business.",
+        )
+
 
 async def verify_token_middleware(request: Request, call_next):
     is_public_receipt = request.url.path.startswith("/api/v1/receipt/") or request.url.path.startswith("/api/v1/public/")
@@ -85,13 +111,24 @@ async def get_current_stakeholder(request: Request) -> Stakeholder:
 def require_roles(allowed_roles: list[str]):
     """Role-based access control dependency"""
     async def role_checker(stakeholder: Stakeholder = Depends(get_current_stakeholder)):
-        # Super admin always has access
+        effective_role = normalize_role(stakeholder.worker_role)
+
         if stakeholder.worker_role == "super_admin":
             return stakeholder
-        
-        # Backward compatibility: "admin" maps to "owner"
-        effective_role = stakeholder.worker_role
-        if effective_role == "admin" and "owner" in allowed_roles:
+
+        if effective_role in {"owner", "manager", "cashier", "accountant"} and effective_role in allowed_roles:
+            return stakeholder
+
+        if effective_role == "owner" and "owner" in allowed_roles:
+            return stakeholder
+
+        if effective_role == "manager" and "manager" in allowed_roles:
+            return stakeholder
+
+        if effective_role == "cashier" and "cashier" in allowed_roles:
+            return stakeholder
+
+        if effective_role == "accountant" and "accountant" in allowed_roles:
             return stakeholder
 
         if effective_role not in allowed_roles:
@@ -106,7 +143,8 @@ def require_roles(allowed_roles: list[str]):
 async def admin_protected_route(request: Request):
     """Admin / Manager / Owner level access"""
     stakeholder = await get_current_stakeholder(request)
-    if stakeholder.worker_role not in ("super_admin", "owner", "admin", "manager"):
+    normalized = normalize_role(stakeholder.worker_role)
+    if normalized not in {"super_admin", "owner", "manager"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrative privileges required",
@@ -117,7 +155,7 @@ async def admin_protected_route(request: Request):
 async def super_admin_protected_route(request: Request):
     """Platform Super Admin level access (FJ Pay operators)"""
     stakeholder = await get_current_stakeholder(request)
-    if stakeholder.worker_role != "super_admin":
+    if normalize_role(stakeholder.worker_role) != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="FJ Pay Platform Administrator access required",
