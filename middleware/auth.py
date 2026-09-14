@@ -43,6 +43,16 @@ def ensure_same_shop(stakeholder: Stakeholder, shop_name: str) -> None:
         )
 
 
+def ensure_branch_access(stakeholder: Stakeholder, branch_id: str | None) -> None:
+    if not branch_id:
+        return
+    if getattr(stakeholder, "worker_branch_id", None) and stakeholder.worker_branch_id != branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="branch access denied: this user cannot access records from another branch.",
+        )
+
+
 async def verify_token_middleware(request: Request, call_next):
     is_public_receipt = request.url.path.startswith("/api/v1/receipt/") or request.url.path.startswith("/api/v1/public/")
     is_public = request.url.path in PUBLIC_PATHS or is_public_receipt
