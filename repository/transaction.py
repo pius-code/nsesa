@@ -537,8 +537,28 @@ async def complete_pending_payment(
     if transaction.status != "pending":
         raise HTTPException(status_code=400, detail="This order is not pending payment") # noqa
 
+    payment_mode = (payload.payment_mode or "CASH").upper()
+    payment = await PaymentService.initiate_payment(
+        payload=PaymentInitiateRequest(
+            transaction_id=str(transaction.id),
+            receipt_id=transaction.receipt_id,
+            amount=transaction.total_price,
+            payment_mode=payment_mode,
+            customer_phone=transaction.customer_number,
+            customer_name=transaction.customer_name,
+            customer_email=transaction.customer_email,
+            branch_name=getattr(transaction, "branch_name", "Main Branch"),
+            metadata={"completed_via": "pending_order"},
+        ),
+        shop_name=worker.worker_shop_name,
+        user_id=worker_id,
+        user_name=worker.worker_name,
+    )
+
     transaction.status = "success"
-    transaction.payment_mode = payload.payment_mode
+    transaction.payment_mode = payment.payment_mode
+    transaction.payment_id = str(payment.id)
+    transaction.payment_reference = payment.payment_reference
     await transaction.save()
 
     await log_transaction_action(
@@ -546,7 +566,7 @@ async def complete_pending_payment(
         action="payment_completed",
         performed_by=worker_id,
         performed_by_name=worker.worker_name,
-        reason=f"Paid via {payload.payment_mode}",
+        reason=f"Paid via {payment_mode}",
         at_shop=worker.worker_shop_name,
     )
 

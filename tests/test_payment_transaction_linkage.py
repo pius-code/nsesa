@@ -94,3 +94,74 @@ def test_save_an_nsesa_transaction_links_payment_and_receipt(monkeypatch):
     assert captured["payload"].amount == 180.0
     assert captured["payload"].payment_mode == "CASH"
     assert captured["shop_name"] == "Nimble Mart"
+
+
+def test_complete_pending_payment_creates_payment_reference_and_receipt_metadata(monkeypatch):
+    captured = {}
+
+    class FakePaymentService:
+        @staticmethod
+        async def initiate_payment(payload, shop_name, user_id, user_name):
+            captured["payload"] = payload
+            captured["shop_name"] = shop_name
+            captured["user_id"] = user_id
+            captured["user_name"] = user_name
+            return SimpleNamespace(id="pay-queued", payment_reference="FJPAY-PEND1", payment_mode="CARD")
+
+    class FakeTransaction:
+        def __init__(self, **kwargs):
+            self.id = "tx-pending-1"
+            self.branch_name = "Main Branch"
+            self.customer_number = "0244000000"
+            self.customer_name = "Ada"
+            self.customer_email = "ada@example.com"
+            self.receipt_id = "nimble-ABC123"
+            self.total_price = 180.0
+            self.items = []
+            self.status = "pending"
+            self.payment_mode = None
+            self.payment_id = None
+            self.payment_reference = None
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        async def save(self):
+            captured["saved"] = True
+            return None
+
+    txn = FakeTransaction()
+
+    async def _fake_get_admin_and_shop(worker_id):
+        return SimpleNamespace(worker_shop_name="Nimble Mart", worker_name="Jane", id=worker_id)
+
+    async def _fake_get_transaction_in_shop(transaction_id, shop_name):
+        assert transaction_id == "tx-pending-1"
+        assert shop_name == "Nimble Mart"
+        return txn
+
+    async def _fake_log_transaction_action(**kwargs):
+        captured["audit"] = kwargs
+
+    monkeypatch.setattr(tx_repo, "PaymentService", FakePaymentService)
+    monkeypatch.setattr(tx_repo, "_get_admin_and_shop", _fake_get_admin_and_shop)
+    monkeypatch.setattr(tx_repo, "_get_transaction_in_shop", _fake_get_transaction_in_shop)
+    monkeypatch.setattr(tx_repo, "log_transaction_action", _fake_log_transaction_action)
+
+    result = asyncio.run(
+        tx_repo.complete_pending_payment(
+            "tx-pending-1",
+            tx_repo.CompletePaymentRequest(payment_mode="card", send_sms=False),
+            "worker-1",
+            None,
+        )
+    )
+
+    assert result["message"] == "Payment recorded successfully"
+    assert txn.status == "success"
+    assert txn.payment_mode == "CARD"
+    assert txn.payment_id == "pay-queued"
+    assert txn.payment_reference == "FJPAY-PEND1"
+    assert captured["shop_name"] == "Nimble Mart"
+    assert captured["payload"].transaction_id == "tx-pending-1"
+    assert captured["payload"].receipt_id == "nimble-ABC123"
+    assert captured["payload"].amount == 180.0
