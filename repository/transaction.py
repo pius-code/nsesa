@@ -255,6 +255,51 @@ async def get_transactions_by_client(client_id: str, shop_name: str):
     ).sort(-Transaction.created_at).to_list() # noqa
 
 
+async def get_public_receipt_payload(receipt_id: str):
+    transaction = await Transaction.find_one({
+        "receipt_id": receipt_id,
+        "$or": [
+            {"is_deleted": False},
+            {"is_deleted": None},
+        ],
+    })
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    DEFAULT_FALLBACK = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif"
+    if not transaction.shop_image or transaction.shop_image == DEFAULT_FALLBACK: # noqa
+        admin = await Stakeholder.find_one(
+            Stakeholder.worker_shop_name == transaction.at_shop,
+            In(Stakeholder.worker_role, ["admin", "super_admin"]),
+        )
+        if admin and admin.worker_shop_image:
+            transaction.shop_image = admin.worker_shop_image
+
+    public_items = []
+    for item in getattr(transaction, "items", []) or []:
+        public_items.append({
+            "product_name": getattr(item, "product_name", None),
+            "quantity": getattr(item, "quantity", 0),
+            "unit_price": getattr(item, "unit_price", 0),
+            "subtotal": getattr(item, "subtotal", 0),
+            "discount": getattr(item, "discount", 0),
+            "tax_rate": getattr(item, "tax_rate", 0),
+        })
+
+    return {
+        "receipt_id": transaction.receipt_id,
+        "customer_name": transaction.customer_name,
+        "shop_name": transaction.at_shop,
+        "shop_image": transaction.shop_image,
+        "status": transaction.status,
+        "payment_mode": transaction.payment_mode,
+        "total_price": transaction.total_price,
+        "items": public_items,
+        "note": transaction.note,
+        "created_at": getattr(transaction, "created_at", None),
+    }
+
+
 async def get_transaction_by_receipt_id(receipt_id: str):
     transaction = await Transaction.find_one(
         Transaction.receipt_id == receipt_id, _not_deleted()

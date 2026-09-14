@@ -228,3 +228,52 @@ def test_reconcile_payment_updates_the_linked_transaction(monkeypatch):
     assert transaction.payment_reference == "FJPAY-REC1"
     assert transaction.payment_mode == "BANK_TRANSFER"
     assert transaction.payment_id == "pay-abc"
+
+
+def test_public_receipt_payload_hides_sensitive_fields(monkeypatch):
+    item = SimpleNamespace(
+        product_name="Rice 25kg",
+        quantity=2,
+        unit_price=90.0,
+        subtotal=180.0,
+        discount=0.0,
+        tax_rate=0.0,
+        refunded_quantity=0,
+    )
+    transaction = SimpleNamespace(
+        receipt_id="nimble-ABC123",
+        customer_name="Ada",
+        customer_number="0244000000",
+        customer_email="ada@example.com",
+        total_price=180.0,
+        payment_mode="CASH",
+        status="success",
+        items=[item],
+        at_shop="Nimble Mart",
+        shop_image="https://example.com/logo.png",
+        created_at="2026-09-14T12:00:00Z",
+        payment_reference="FJPAY-ABC123",
+        payment_id="pay-123",
+        processed_by_id="worker-1",
+        note="No pepper",
+    )
+
+    async def _fake_find_one(*args, **kwargs):
+        return transaction
+
+    async def _fake_stakeholder_find_one(**kwargs):
+        return SimpleNamespace(worker_shop_image="https://example.com/logo.png")
+
+    monkeypatch.setattr(tx_repo.Transaction, "find_one", _fake_find_one)
+    monkeypatch.setattr(tx_repo.Stakeholder, "find_one", _fake_stakeholder_find_one)
+
+    result = asyncio.run(tx_repo.get_public_receipt_payload("nimble-ABC123"))
+
+    assert result["receipt_id"] == "nimble-ABC123"
+    assert result["customer_name"] == "Ada"
+    assert result["total_price"] == 180.0
+    assert result["items"][0]["product_name"] == "Rice 25kg"
+    assert "customer_number" not in result
+    assert "customer_email" not in result
+    assert "payment_id" not in result
+    assert "processed_by_id" not in result
