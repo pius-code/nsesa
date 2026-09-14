@@ -9,6 +9,7 @@ from model.Client import Client
 from beanie.operators import Or, In
 from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
+from repository.stock_movement import StockMovementService
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -47,16 +48,36 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
 
         inventory_items_map[item.product_id] = inventory_item
 
-    # 3. Apply atomic decrements directly in the database using inc()
+    # 3. Apply atomic decrements directly in the database using inc() and record ledger
     for item in payload.items:
         inv_item_record = inventory_items_map[item.product_id]
-        new_amount = inv_item_record.amount_available - item.quantity
+        prev_qty = inv_item_record.amount_available
+        new_amount = prev_qty - item.quantity
         await inv_item_record.inc({Inventory.amount_available: -item.quantity})  # noqa
         if new_amount <= 0:
             await inv_item_record.set({  # noqa
                 Inventory.is_available: False,
                 Inventory.amount_available: 0
             })
+        # Record in stock movement ledger
+        try:
+            await StockMovementService.record_movement(
+                product_id=str(inv_item_record.id),
+                product_name=inv_item_record.product_name,
+                sku=inv_item_record.sku or inv_item_record.barcode,
+                shop_name=shop_name,
+                movement_type="SALE",
+                quantity_change=-item.quantity,
+                previous_quantity=prev_qty,
+                new_quantity=max(0, new_amount),
+                unit_cost=inv_item_record.cost_price,
+                unit_price=item.unit_price,
+                performed_by_id=payload.processed_by_id or "system",
+                performed_by_name=payload.processed_by,
+                reason="POS Customer Sale",
+            )
+        except Exception as e:
+            pass
 
     # 4. Save the actual transaction document
     shop_image = None
@@ -231,7 +252,14 @@ async def _get_transaction_in_shop(transaction_id: str, shop_name: str) -> Trans
     return transaction
 
 
-async def _restock_items(items: list[TransactionItem]):
+async def _restock_items(
+    items: list[TransactionItem],
+    shop_name: str,
+    user_id: str,
+    user_name: str,
+    movement_type: str = "REFUND",
+    reason: str = "Transaction Refund / Restock"
+):
     for item in items:
         try:
             inv = await Inventory.get(PydanticObjectId(item.product_id))
@@ -239,16 +267,43 @@ async def _restock_items(items: list[TransactionItem]):
             continue
         if not inv:
             continue
+        prev_qty = inv.amount_available
+        new_qty = prev_qty + item.quantity
         await inv.inc({Inventory.amount_available: item.quantity})  # noqa
         if not inv.is_available:
             await inv.set({Inventory.is_available: True})  # noqa
+        try:
+            await StockMovementService.record_movement(
+                product_id=str(inv.id),
+                product_name=inv.product_name,
+                sku=inv.sku or inv.barcode,
+                shop_name=shop_name,
+                movement_type=movement_type,  # type: ignore
+                quantity_change=item.quantity,
+                previous_quantity=prev_qty,
+                new_quantity=new_qty,
+                unit_cost=inv.cost_price,
+                unit_price=item.unit_price,
+                performed_by_id=user_id,
+                performed_by_name=user_name,
+                reason=reason,
+            )
+        except Exception:
+            pass
 
 
 async def delete_transaction(transaction_id: str, payload: TransactionActionRequest, admin_id: str): # noqa
     admin = await _get_admin_and_shop(admin_id)
     transaction = await _get_transaction_in_shop(transaction_id, admin.worker_shop_name) # noqa
 
-    await _restock_items(transaction.items)
+    await _restock_items(
+        items=transaction.items,
+        shop_name=admin.worker_shop_name,
+        user_id=admin_id,
+        user_name=admin.worker_name,
+        movement_type="RESTOCK",
+        reason=f"Transaction voided/deleted: {payload.reason}"
+    )
     transaction.is_deleted = True
     await transaction.save()
 
@@ -275,7 +330,14 @@ async def refund_transaction(
     if transaction.status == "returned":
         raise HTTPException(status_code=400, detail="Transaction has already been refunded") # noqa
 
-    await _restock_items(transaction.items)
+    await _restock_items(
+        items=transaction.items,
+        shop_name=admin.worker_shop_name,
+        user_id=admin_id,
+        user_name=admin.worker_name,
+        movement_type="REFUND",
+        reason=f"Transaction refunded: {payload.reason}"
+    )
     transaction.status = "returned"
     await transaction.save()
 

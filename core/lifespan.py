@@ -1,16 +1,10 @@
 # initializations for mongodb client and also contains the lifeSpan
-#  for the application(weird, I know)
-
-from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
 from beanie import init_beanie
 from utils.logger import logger
 from model import Nsesa_model as all_models
-
-
-load_dotenv()
+from core.config import get_db_config
 
 
 @asynccontextmanager
@@ -18,14 +12,15 @@ async def lifespan(app):
     """Lifespan context manager for FastAPI app"""
     mongo_client = None
     try:
-        mongo_client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+        db_cfg = get_db_config()
+        mongo_client = AsyncIOMotorClient(db_cfg.mongo_url)
         await init_beanie(
-            database=mongo_client.get_default_database(),  # type: ignore
+            database=mongo_client.get_default_database(),
             document_models=all_models,
         )
         logger.info(
-            f"Connected to MongoDB with {len(all_models)} document models"
-        )  # noqa
+            f"Connected to MongoDB with {len(all_models)} document models for FJ PAY"
+        )
 
         yield
 

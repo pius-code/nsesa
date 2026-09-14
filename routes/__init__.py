@@ -9,9 +9,16 @@ from routes.dashboard import router as dashboard_router
 from routes.broadcast import router as broadcast_router
 from routes.shop import router as shop_router
 from routes.reports import router as reports_router
+from routes.branch import branch_router
+from routes.payment import payment_router
+from routes.stock_movement import stock_router
+from routes.expense import expense_router
+from routes.subscription import subscription_router
+from routes.onboarding import onboarding_router
+
 api_router = APIRouter()
 
-
+api_router.include_router(onboarding_router)
 api_router.include_router(stakeholder_router)
 api_router.include_router(transaction_router)
 api_router.include_router(admin_router)
@@ -22,3 +29,8 @@ api_router.include_router(dashboard_router)
 api_router.include_router(broadcast_router)
 api_router.include_router(shop_router)
 api_router.include_router(reports_router)
+api_router.include_router(branch_router)
+api_router.include_router(payment_router)
+api_router.include_router(stock_router)
+api_router.include_router(expense_router)
+api_router.include_router(subscription_router)
