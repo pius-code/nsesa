@@ -277,3 +277,85 @@ def test_public_receipt_payload_hides_sensitive_fields(monkeypatch):
     assert "customer_email" not in result
     assert "payment_id" not in result
     assert "processed_by_id" not in result
+
+
+def test_dashboard_overview_returns_summary_values(monkeypatch):
+    class FakeQueryField:
+        def __init__(self, value=None):
+            self.value = value
+
+        def __eq__(self, other):
+            return True
+
+        def __ge__(self, other):
+            return True
+
+        def __lt__(self, other):
+            return True
+
+    class FakeInventoryFind:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def sort(self, *_args, **_kwargs):
+            return self
+
+        async def to_list(self):
+            return self.rows
+
+    async def _fake_run_aggregation(pipeline):
+        match_stage = next((step["$match"] for step in pipeline if isinstance(step, dict) and "$match" in step), {})
+        group_stage = next((step["$group"] for step in pipeline if isinstance(step, dict) and "$group" in step), {})
+        count_stage = next((step["$count"] for step in pipeline if isinstance(step, dict) and "$count" in step), None)
+
+        if match_stage.get("status") == "pending":
+            return [{"count": 2, "value": 60.0}]
+        if count_stage == "count":
+            return [{"count": 12}]
+        if group_stage.get("_id") == "$payment_mode":
+            return [{"payment_mode": "CASH", "total": 300.0, "count": 2}]
+        if group_stage.get("_id") == "$items.product_id":
+            return [{"_id": "prod-1", "product_name": "Rice", "quantity_sold": 10, "revenue": 250.0}]
+        if match_stage.get("status") == "success" and "created_at" in match_stage:
+            return [{"revenue": 500.0, "count": 4}]
+        return []
+
+    class FakeTransactionAuditFind:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self):
+            return self.rows
+
+    class FakeTransactionFind:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self):
+            return self.rows
+
+    async def _fake_get_distinct(_field, _filter):
+        return ["Ada", "Sam", "customer"]
+
+    monkeypatch.setattr("repository.dashboard._run_aggregation", _fake_run_aggregation)
+    monkeypatch.setattr("repository.dashboard.Inventory.worker_shop_name", FakeQueryField("Nimble Mart"), raising=False)
+    monkeypatch.setattr("repository.dashboard.Inventory.is_deleted", FakeQueryField(False), raising=False)
+    monkeypatch.setattr("repository.dashboard.Inventory.amount_available", FakeQueryField(2), raising=False)
+    monkeypatch.setattr("repository.dashboard.Inventory.find", lambda *args, **kwargs: FakeInventoryFind([SimpleNamespace(id="inv-1", product_name="Rice", amount_available=2)]))
+    monkeypatch.setattr("repository.dashboard.TransactionAudit.action", FakeQueryField("refunded"), raising=False)
+    monkeypatch.setattr("repository.dashboard.TransactionAudit.at_shop", FakeQueryField("Nimble Mart"), raising=False)
+    monkeypatch.setattr("repository.dashboard.TransactionAudit.created_at", FakeQueryField(), raising=False)
+    monkeypatch.setattr("repository.dashboard.TransactionAudit.find", lambda *args, **kwargs: FakeTransactionAuditFind([SimpleNamespace(transaction_id="507f1f77bcf86cd799439011")]))
+    monkeypatch.setattr("repository.dashboard.Transaction.id", "id", raising=False)
+    monkeypatch.setattr("repository.dashboard.Transaction.find", lambda *args, **kwargs: FakeTransactionFind([SimpleNamespace(total_price=30.0)]))
+    monkeypatch.setattr("repository.dashboard.Transaction.get_pymongo_collection", lambda: SimpleNamespace(distinct=_fake_get_distinct))
+
+    result = asyncio.run(tx_repo.get_dashboard_overview("Nimble Mart"))
+
+    assert result.today_revenue == 500.0
+    assert result.today_transaction_count == 4
+    assert result.payment_breakdown_today[0].payment_mode == "CASH"
+    assert result.top_products_week[0].product_name == "Rice"
+    assert result.low_stock_items[0].product_name == "Rice"
+    assert result.pending_order_count == 2
+    assert result.month_completed_transaction_count == 12
