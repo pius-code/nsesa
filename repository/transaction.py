@@ -18,6 +18,8 @@ from beanie.operators import Or, In
 from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
 from repository.stock_movement import StockMovementService
+from repository.payment import PaymentService
+from schema.payment import PaymentInitiateRequest
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -149,6 +151,32 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         at_shop=shop_name
     )
     await new_transaction.insert()  # noqa
+
+    if not payload.pay_later:
+        payment_mode = (payload.payment_mode or "CASH").upper()
+        try:
+            payment = await PaymentService.initiate_payment(
+                payload=PaymentInitiateRequest(
+                    transaction_id=str(new_transaction.id),
+                    receipt_id=new_transaction.receipt_id,
+                    amount=new_transaction.total_price,
+                    payment_mode=payment_mode,
+                    customer_phone=new_transaction.customer_number,
+                    customer_name=new_transaction.customer_name,
+                    customer_email=new_transaction.customer_email,
+                    branch_name=getattr(new_transaction, "branch_name", "Main Branch"),
+                    metadata={"created_via": "transaction_create"},
+                ),
+                shop_name=shop_name,
+                user_id=payload.processed_by_id or "system",
+                user_name=payload.processed_by or "system",
+            )
+            new_transaction.payment_id = str(payment.id)
+            new_transaction.payment_reference = payment.payment_reference
+            new_transaction.payment_mode = payment.payment_mode
+            await new_transaction.save()
+        except Exception:
+            pass
 
     # Pending (pay-later) orders haven't been paid yet — no receipt SMS until # noqa
     # payment is actually completed.
