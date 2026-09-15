@@ -359,3 +359,68 @@ def test_dashboard_overview_returns_summary_values(monkeypatch):
     assert result.low_stock_items[0].product_name == "Rice"
     assert result.pending_order_count == 2
     assert result.month_completed_transaction_count == 12
+
+
+def test_financial_report_ignores_invalid_refund_ids(monkeypatch):
+    async def _fake_run_aggregation(pipeline):
+        if len(pipeline) >= 3 and pipeline[1].get("$unwind") == {"path": "$items", "preserveNullAndEmptyArrays": True}:
+            return [{"total_revenue": 500.0, "total_cogs": 200.0, "total_transactions": 4}]
+        if len(pipeline) >= 3 and pipeline[1].get("$unwind") == "$items":
+            return [{"_id": "prod-1", "product_name": "Rice", "quantity_sold": 10, "revenue": 250.0, "cogs": 50.0, "profit": 200.0, "margin_pct": 80.0}]
+        if pipeline[1].get("$group", {}).get("_id") == "$payment_mode":
+            return [{"_id": "CASH", "total": 300.0, "count": 3}]
+        if len(pipeline) >= 3 and pipeline[1].get("$group", {}).get("_id") == {"date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}, "tx_id": "$_id"}:
+            return [{"_id": "2026-09-14", "revenue": 500.0, "cogs": 200.0, "count": 3}]
+        if pipeline[0].get("$match", {}).get("status") == "pending":
+            return [{"count": 2, "value": 60.0}]
+        return []
+
+    class FakeAuditFind:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self):
+            return self.rows
+
+    class FakeTransactionFind:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self):
+            return self.rows
+
+    class FakeQueryField:
+        def __init__(self, value=None):
+            self.value = value
+
+        def __eq__(self, other):
+            return True
+
+        def __ge__(self, other):
+            return True
+
+        def __lt__(self, other):
+            return True
+
+    monkeypatch.setattr("repository.reports._run_aggregation", _fake_run_aggregation)
+    monkeypatch.setattr("repository.reports.TransactionAudit.action", FakeQueryField("refunded"), raising=False)
+    monkeypatch.setattr("repository.reports.TransactionAudit.at_shop", FakeQueryField("Nimble Mart"), raising=False)
+    monkeypatch.setattr("repository.reports.TransactionAudit.created_at", FakeQueryField(), raising=False)
+    monkeypatch.setattr("repository.reports.TransactionAudit.find", lambda *args, **kwargs: FakeAuditFind([
+        SimpleNamespace(transaction_id="not-an-object-id"),
+        SimpleNamespace(transaction_id="507f1f77bcf86cd799439011"),
+    ]))
+    monkeypatch.setattr("repository.reports.Transaction.id", "id", raising=False)
+    monkeypatch.setattr("repository.reports.Transaction.find", lambda *args, **kwargs: FakeTransactionFind([
+        SimpleNamespace(total_price=100.0),
+    ]))
+
+    resp = asyncio.run(tx_repo.get_financial_report("Nimble Mart", period="weekly"))
+
+    assert resp.total_revenue == 500.0
+    assert resp.gross_profit == 300.0
+    assert resp.total_transactions == 4
+    assert resp.refund_count == 2
+    assert resp.refund_value == 100.0
+    assert resp.pending_tabs_count == 2
+    assert resp.pending_tabs_value == 60.0

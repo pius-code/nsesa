@@ -20,6 +20,7 @@ from repository.transaction_audit import log_transaction_action, get_transaction
 from repository.stock_movement import StockMovementService
 from repository.payment import PaymentService
 from repository.dashboard import get_dashboard_overview
+from repository.reports import get_financial_report
 from schema.payment import PaymentInitiateRequest
 from datetime import datetime, timedelta, timezone
 import os
