@@ -176,15 +176,16 @@ async def get_financial_report(
     product_rows = await _run_aggregation(product_pipeline)
     top_products = [
         ReportMetricItem(
-            product_id=str(row["_id"]),
-            product_name=row["product_name"],
-            quantity_sold=row["quantity_sold"],
-            revenue=round(row["revenue"], 2),
-            cogs=round(row["cogs"], 2),
-            profit=round(row["profit"], 2),
-            margin_pct=round(row["margin_pct"], 2),
+            product_id=str(row.get("_id") or row.get("product_id") or ""),
+            product_name=row.get("product_name") or "Unknown product",
+            quantity_sold=row.get("quantity_sold", 0),
+            revenue=round(float(row.get("revenue", 0.0) or 0.0), 2),
+            cogs=round(float(row.get("cogs", 0.0) or 0.0), 2),
+            profit=round(float(row.get("profit", 0.0) or 0.0), 2),
+            margin_pct=round(float(row.get("margin_pct", 0.0) or 0.0), 2),
         )
         for row in product_rows
+        if "product_name" in row or "_id" in row or "product_id" in row
     ]
 
     # 3. Payment Method Breakdown
@@ -202,11 +203,12 @@ async def get_financial_report(
     payment_rows = await _run_aggregation(payment_pipeline)
     payment_breakdown = [
         PaymentMethodBreakdown(
-            payment_mode=row["_id"] or "unspecified",
-            total=round(row["total"], 2),
-            count=row["count"],
+            payment_mode=row.get("_id") or row.get("payment_mode") or "unspecified",
+            total=round(float(row.get("total", 0.0) or 0.0), 2),
+            count=row.get("count", 0),
         )
         for row in payment_rows
+        if "total" in row or "payment_mode" in row or "_id" in row
     ]
 
     # 4. Daily Trends Curve
@@ -248,13 +250,14 @@ async def get_financial_report(
     daily_rows = await _run_aggregation(daily_pipeline)
     daily_trends = [
         DailyTrendPoint(
-            date=row["_id"],
-            revenue=round(row["revenue"], 2),
-            cogs=round(row["cogs"], 2),
-            profit=round(row["revenue"] - row["cogs"], 2),
-            count=row["count"],
+            date=row.get("_id") or row.get("date") or "unknown",
+            revenue=round(float(row.get("revenue", 0.0) or 0.0), 2),
+            cogs=round(float(row.get("cogs", 0.0) or 0.0), 2),
+            profit=round(float(row.get("revenue", 0.0) or 0.0) - float(row.get("cogs", 0.0) or 0.0), 2),
+            count=row.get("count", 0),
         )
         for row in daily_rows
+        if "revenue" in row or "_id" in row or "date" in row
     ]
 
     # 5. Refunds & Pending Tabs in Period
@@ -266,9 +269,15 @@ async def get_financial_report(
     ).to_list()
     refund_value = 0.0
     if refund_entries:
-        refund_tx_ids = [PydanticObjectId(e.transaction_id) for e in refund_entries]
-        refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list()
-        refund_value = sum(t.total_price for t in refunded_txs)
+        refund_tx_ids = []
+        for entry in refund_entries:
+            try:
+                refund_tx_ids.append(PydanticObjectId(entry.transaction_id))
+            except Exception:
+                continue
+        if refund_tx_ids:
+            refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list()
+            refund_value = sum(t.total_price for t in refunded_txs)
 
     pending_pipeline = [
         {

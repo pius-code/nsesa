@@ -15,7 +15,7 @@ class PaymentService:
     async def initiate_payment(payload: PaymentInitiateRequest, shop_name: str, user_id: str, user_name: str) -> Payment:
         # 1. Check idempotency key to prevent double charging
         if payload.idempotency_key:
-            existing = await Payment.find_one(Payment.idempotency_key == payload.idempotency_key)
+            existing = await Payment.find_one({"idempotency_key": payload.idempotency_key})
             if existing:
                 return existing
 
@@ -96,10 +96,10 @@ class PaymentService:
 
     @staticmethod
     async def verify_payment(reference: str, shop_name: str) -> Payment:
-        payment = await Payment.find_one(
-            Payment.payment_reference == reference,
-            Payment.shop_name == shop_name
-        )
+        payment = await Payment.find_one({
+            "payment_reference": reference,
+            "shop_name": shop_name,
+        })
         if not payment:
             raise HTTPException(status_code=404, detail="Payment reference not found")
 
@@ -117,10 +117,10 @@ class PaymentService:
 
     @staticmethod
     async def reconcile_payment(payload: PaymentReconcileRequest, shop_name: str, user_name: str) -> Payment:
-        payment = await Payment.find_one(
-            Payment.payment_reference == payload.payment_reference,
-            Payment.shop_name == shop_name
-        )
+        payment = await Payment.find_one({
+            "payment_reference": payload.payment_reference,
+            "shop_name": shop_name,
+        })
         if not payment:
             raise HTTPException(status_code=404, detail="Payment reference not found")
 
@@ -137,10 +137,26 @@ class PaymentService:
         payment.metadata["reconciliation_reason"] = payload.reason
         payment.metadata["reconciled_at"] = datetime.now(timezone.utc).isoformat()
         await payment.save()
+
+        if payment.transaction_id:
+            try:
+                try:
+                    transaction = await Transaction.get(PydanticObjectId(payment.transaction_id))
+                except Exception:
+                    transaction = await Transaction.get(payment.transaction_id)
+
+                if transaction and transaction.at_shop == shop_name:
+                    transaction.payment_id = str(payment.id)
+                    transaction.payment_reference = payment.payment_reference
+                    transaction.payment_mode = payment.payment_mode
+                    if getattr(transaction, "status", None) in {"pending", "PENDING", None}:
+                        transaction.status = "success"
+                    await transaction.save()
+            except Exception:
+                pass
+
         return payment
 
     @staticmethod
     async def get_shop_payments(shop_name: str, limit: int = 50, skip: int = 0) -> list[Payment]:
-        return await Payment.find(
-            Payment.shop_name == shop_name
-        ).sort(-Payment.created_at).skip(skip).limit(limit).to_list()
+        return await Payment.find({"shop_name": shop_name}).sort(-Payment.created_at).skip(skip).limit(limit).to_list()
