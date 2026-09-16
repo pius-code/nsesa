@@ -2,7 +2,15 @@
 from fastapi import HTTPException, BackgroundTasks
 from beanie import PydanticObjectId
 from model.Transaction import Transaction, TransactionItem
-from schema.transaction import TransactionCreate, TransactionActionRequest, TransactionEditRequest, ResendReceiptRequest, CompletePaymentRequest, AddItemsRequest # noqa
+from schema.transaction import (
+    TransactionCreate,
+    TransactionItemCreate,
+    TransactionActionRequest,
+    TransactionEditRequest,
+    ResendReceiptRequest,
+    CompletePaymentRequest,
+    AddItemsRequest,
+)  # noqa
 from model.Inventory import Inventory
 from model.Stakeholder import Stakeholder
 from model.Client import Client
@@ -10,6 +18,9 @@ from beanie.operators import Or, In
 from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
 from repository.stock_movement import StockMovementService
+from repository.payment import PaymentService
+from repository.dashboard import get_dashboard_overview
+from schema.payment import PaymentInitiateRequest
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -53,11 +64,11 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         inv_item_record = inventory_items_map[item.product_id]
         prev_qty = inv_item_record.amount_available
         new_amount = prev_qty - item.quantity
-        await inv_item_record.inc({Inventory.amount_available: -item.quantity})  # noqa
+        await inv_item_record.inc({"amount_available": -item.quantity})  # noqa
         if new_amount <= 0:
             await inv_item_record.set({  # noqa
-                Inventory.is_available: False,
-                Inventory.amount_available: 0
+                "is_available": False,
+                "amount_available": 0
             })
         # Record in stock movement ledger
         try:
@@ -142,6 +153,32 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
     )
     await new_transaction.insert()  # noqa
 
+    if not payload.pay_later:
+        payment_mode = (payload.payment_mode or "CASH").upper()
+        try:
+            payment = await PaymentService.initiate_payment(
+                payload=PaymentInitiateRequest(
+                    transaction_id=str(new_transaction.id),
+                    receipt_id=new_transaction.receipt_id,
+                    amount=new_transaction.total_price,
+                    payment_mode=payment_mode,
+                    customer_phone=new_transaction.customer_number,
+                    customer_name=new_transaction.customer_name,
+                    customer_email=new_transaction.customer_email,
+                    branch_name=getattr(new_transaction, "branch_name", "Main Branch"),
+                    metadata={"created_via": "transaction_create"},
+                ),
+                shop_name=shop_name,
+                user_id=payload.processed_by_id or "system",
+                user_name=payload.processed_by or "system",
+            )
+            new_transaction.payment_id = str(payment.id)
+            new_transaction.payment_reference = payment.payment_reference
+            new_transaction.payment_mode = payment.payment_mode
+            await new_transaction.save()
+        except Exception:
+            pass
+
     # Pending (pay-later) orders haven't been paid yet — no receipt SMS until # noqa
     # payment is actually completed.
     if not payload.pay_later and payload.send_sms and new_transaction.customer_number and background_tasks: # noqa
@@ -219,6 +256,51 @@ async def get_transactions_by_client(client_id: str, shop_name: str):
     ).sort(-Transaction.created_at).to_list() # noqa
 
 
+async def get_public_receipt_payload(receipt_id: str):
+    transaction = await Transaction.find_one({
+        "receipt_id": receipt_id,
+        "$or": [
+            {"is_deleted": False},
+            {"is_deleted": None},
+        ],
+    })
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    DEFAULT_FALLBACK = "https://res.cloudinary.com/dho3j5aqn/image/upload/v1780329934/simple1_jdsqio.avif"
+    if not transaction.shop_image or transaction.shop_image == DEFAULT_FALLBACK: # noqa
+        admin = await Stakeholder.find_one(
+            Stakeholder.worker_shop_name == transaction.at_shop,
+            In(Stakeholder.worker_role, ["admin", "super_admin"]),
+        )
+        if admin and admin.worker_shop_image:
+            transaction.shop_image = admin.worker_shop_image
+
+    public_items = []
+    for item in getattr(transaction, "items", []) or []:
+        public_items.append({
+            "product_name": getattr(item, "product_name", None),
+            "quantity": getattr(item, "quantity", 0),
+            "unit_price": getattr(item, "unit_price", 0),
+            "subtotal": getattr(item, "subtotal", 0),
+            "discount": getattr(item, "discount", 0),
+            "tax_rate": getattr(item, "tax_rate", 0),
+        })
+
+    return {
+        "receipt_id": transaction.receipt_id,
+        "customer_name": transaction.customer_name,
+        "shop_name": transaction.at_shop,
+        "shop_image": transaction.shop_image,
+        "status": transaction.status,
+        "payment_mode": transaction.payment_mode,
+        "total_price": transaction.total_price,
+        "items": public_items,
+        "note": transaction.note,
+        "created_at": getattr(transaction, "created_at", None),
+    }
+
+
 async def get_transaction_by_receipt_id(receipt_id: str):
     transaction = await Transaction.find_one(
         Transaction.receipt_id == receipt_id, _not_deleted()
@@ -269,9 +351,9 @@ async def _restock_items(
             continue
         prev_qty = inv.amount_available
         new_qty = prev_qty + item.quantity
-        await inv.inc({Inventory.amount_available: item.quantity})  # noqa
+        await inv.inc({"amount_available": item.quantity})  # noqa
         if not inv.is_available:
-            await inv.set({Inventory.is_available: True})  # noqa
+            await inv.set({"is_available": True})  # noqa
         try:
             await StockMovementService.record_movement(
                 product_id=str(inv.id),
@@ -406,12 +488,12 @@ async def edit_transaction(transaction_id: str, payload: TransactionEditRequest,
 
         for product_id, delta in deltas.items():
             inv = inventory_cache[product_id]
-            await inv.inc({Inventory.amount_available: -delta})  # noqa
+            await inv.inc({"amount_available": -delta})  # noqa
             new_amount = inv.amount_available - delta
             if new_amount <= 0:
-                await inv.set({Inventory.is_available: False, Inventory.amount_available: 0}) # noqa
+                await inv.set({"is_available": False, "amount_available": 0}) # noqa
             elif not inv.is_available:
-                await inv.set({Inventory.is_available: True})  # noqa
+                await inv.set({"is_available": True})  # noqa
 
         new_total = sum(i.subtotal for i in payload.items)
         changes["items"] = {
@@ -501,8 +583,28 @@ async def complete_pending_payment(
     if transaction.status != "pending":
         raise HTTPException(status_code=400, detail="This order is not pending payment") # noqa
 
+    payment_mode = (payload.payment_mode or "CASH").upper()
+    payment = await PaymentService.initiate_payment(
+        payload=PaymentInitiateRequest(
+            transaction_id=str(transaction.id),
+            receipt_id=transaction.receipt_id,
+            amount=transaction.total_price,
+            payment_mode=payment_mode,
+            customer_phone=transaction.customer_number,
+            customer_name=transaction.customer_name,
+            customer_email=transaction.customer_email,
+            branch_name=getattr(transaction, "branch_name", "Main Branch"),
+            metadata={"completed_via": "pending_order"},
+        ),
+        shop_name=worker.worker_shop_name,
+        user_id=worker_id,
+        user_name=worker.worker_name,
+    )
+
     transaction.status = "success"
-    transaction.payment_mode = payload.payment_mode
+    transaction.payment_mode = payment.payment_mode
+    transaction.payment_id = str(payment.id)
+    transaction.payment_reference = payment.payment_reference
     await transaction.save()
 
     await log_transaction_action(
@@ -510,7 +612,7 @@ async def complete_pending_payment(
         action="payment_completed",
         performed_by=worker_id,
         performed_by_name=worker.worker_name,
-        reason=f"Paid via {payload.payment_mode}",
+        reason=f"Paid via {payment_mode}",
         at_shop=worker.worker_shop_name,
     )
 
@@ -552,10 +654,10 @@ async def add_items_to_pending_order(transaction_id: str, payload: AddItemsReque
 
     for item in payload.items:
         inv = inventory_map[item.product_id]
-        await inv.inc({Inventory.amount_available: -item.quantity})  # noqa
+        await inv.inc({"amount_available": -item.quantity})  # noqa
         new_amount = inv.amount_available - item.quantity
         if new_amount <= 0:
-            await inv.set({Inventory.is_available: False, Inventory.amount_available: 0}) # noqa
+            await inv.set({"is_available": False, "amount_available": 0}) # noqa
 
     items_by_id = {i.product_id: i for i in transaction.items}
     for new_item in payload.items:
@@ -584,7 +686,14 @@ async def cancel_pending_order(transaction_id: str, payload: TransactionActionRe
             detail="Only pending orders can be cancelled this way — use delete for completed transactions", # noqa
         )
 
-    await _restock_items(transaction.items)
+    await _restock_items(
+        items=transaction.items,
+        shop_name=worker.worker_shop_name,
+        user_id=worker_id,
+        user_name=worker.worker_name,
+        movement_type="RESTOCK",
+        reason=f"Pending order cancelled: {payload.reason}",
+    )
     transaction.is_deleted = True
     await transaction.save()
 
