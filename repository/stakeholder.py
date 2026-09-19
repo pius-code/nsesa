@@ -110,7 +110,7 @@ async def update_shop_image(admin_id: str, payload: ShopImageUpdate):
     # Sync worker_shop_image to all workers in this shop
     await Stakeholder.find(
         Stakeholder.worker_shop_name == worker.worker_shop_name
-    ).set({"worker_shop_image": payload.worker_shop_image})
+    ).set({Stakeholder.worker_shop_image: payload.worker_shop_image})
 
     return {"message": "Shop image updated successfully"}
 
