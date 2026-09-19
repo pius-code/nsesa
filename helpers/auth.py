@@ -1,13 +1,16 @@
 from jose import JWTError, jwt
+import os
+from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 
-from core.config import get_auth_config
+load_dotenv()
 
-auth_cfg = get_auth_config()
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 
 
 def generate_token(user_id: str):
-    expire = datetime.now(timezone.utc) + timedelta(minutes=auth_cfg.token_expire_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(hours=24)
     payload = {
         "sub": user_id,
         "exp": expire,
@@ -15,17 +18,15 @@ def generate_token(user_id: str):
     }
     return jwt.encode(
         payload,
-        auth_cfg.jwt_secret,
-        algorithm=auth_cfg.jwt_algorithm,
-    )
+        str(JWT_SECRET_KEY),
+        algorithm=str(JWT_ALGORITHM),
+    )  # noqa
 
 
 def extract_id_from_token(token: str) -> str | None:
     try:
         decoded = jwt.decode(
-            token,
-            auth_cfg.jwt_secret,
-            algorithms=[auth_cfg.jwt_algorithm],
+            token, str(JWT_SECRET_KEY), algorithms=[str(JWT_ALGORITHM)]
         )
         return decoded.get("sub")
     except JWTError:

@@ -70,13 +70,8 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
     ]
     payment_rows = await _run_aggregation(payment_pipeline)
     payment_breakdown = [
-        {
-            "payment_mode": row.get("_id") or row.get("payment_mode") or "unspecified",
-            "total": row.get("total", 0.0),
-            "count": row.get("count", 0),
-        }
+        {"payment_mode": row["_id"] or "unspecified", "total": row["total"], "count": row["count"]} # noqa
         for row in payment_rows
-        if "total" in row or "payment_mode" in row or "_id" in row
     ]
 
     top_products_pipeline = [
@@ -97,13 +92,12 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
     top_rows = await _run_aggregation(top_products_pipeline)
     top_products = [
         {
-            "product_id": row.get("_id") or row.get("product_id") or "",
-            "product_name": row.get("product_name") or "Unknown product",
-            "quantity_sold": row.get("quantity_sold", 0),
-            "revenue": row.get("revenue", 0.0),
+            "product_id": row["_id"],
+            "product_name": row["product_name"],
+            "quantity_sold": row["quantity_sold"],
+            "revenue": row["revenue"],
         }
         for row in top_rows
-        if "product_name" in row or "_id" in row or "product_id" in row
     ]
 
     refund_entries = await TransactionAudit.find(
@@ -113,15 +107,9 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
     ).to_list()
     refund_value = 0.0
     if refund_entries:
-        refund_tx_ids = []
-        for entry in refund_entries:
-            try:
-                refund_tx_ids.append(PydanticObjectId(entry.transaction_id))
-            except Exception:
-                continue
-        if refund_tx_ids:
-            refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list() # noqa
-            refund_value = sum(t.total_price for t in refunded_txs)
+        refund_tx_ids = [PydanticObjectId(e.transaction_id) for e in refund_entries] # noqa
+        refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list() # noqa
+        refund_value = sum(t.total_price for t in refunded_txs)
 
     # cancelled pending orders are soft-deleted but keep status="pending", so
     # NOT_DELETED must be applied here too or cancelled tabs would still count # noqa
@@ -130,8 +118,8 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         {"$group": {"_id": None, "value": {"$sum": "$total_price"}, "count": {"$sum": 1}}}, # noqa
     ]
     pending_result = await _run_aggregation(pending_pipeline)
-    pending_count = pending_result[0].get("count", 0) if pending_result else 0
-    pending_value = pending_result[0].get("value", 0.0) if pending_result else 0.0
+    pending_count = pending_result[0]["count"] if pending_result else 0
+    pending_value = pending_result[0]["value"] if pending_result else 0.0
 
     # Unique customers by name, excluding the "customer" placeholder used for
     # walk-ins who didn't give a name.
@@ -149,7 +137,7 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         {"$count": "count"},
     ]
     month_result = await _run_aggregation(month_pipeline)
-    month_completed_count = month_result[0].get("count", 0) if month_result else 0
+    month_completed_count = month_result[0]["count"] if month_result else 0
 
     low_stock = await Inventory.find(
         Inventory.worker_shop_name == shop_name,

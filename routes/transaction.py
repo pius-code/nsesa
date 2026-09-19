@@ -3,7 +3,6 @@ from schema.transaction import TransactionCreate, TransactionActionRequest, Tran
 from repository.transaction import (
     save_an_nsesa_transaction,
     get_my_shop_transactions as fetch_shop_transactions,
-    get_public_receipt_payload,
     get_transaction_by_receipt_id,
     delete_transaction,
     refund_transaction,
@@ -31,8 +30,8 @@ async def create_transaction(payload: TransactionCreate, request: Request, backg
 
 @router.get("/receipt/{receipt_id}")
 async def get_receipt(receipt_id: str):
-    """Public route — returns a sanitized transaction summary by receipt ID"""
-    return await get_public_receipt_payload(receipt_id)
+    """Public route — returns a transaction by receipt ID"""
+    return await get_transaction_by_receipt_id(receipt_id)
 
 
 @router.get("/return_my_shop_transactions")
