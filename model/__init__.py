@@ -5,6 +5,7 @@ from model.Category import Category
 from model.Client import Client
 from model.TransactionAudit import TransactionAudit
 from model.Shop import Shop
+from model.Expense import Expense
 
 
-Nsesa_model = [Inventory, Stakeholder, Transaction, Category, Client, TransactionAudit, Shop] # noqa
+Nsesa_model = [Inventory, Stakeholder, Transaction, Category, Client, TransactionAudit, Shop, Expense] # noqa

@@ -9,6 +9,7 @@ from routes.dashboard import router as dashboard_router
 from routes.broadcast import router as broadcast_router
 from routes.shop import router as shop_router
 from routes.reports import router as reports_router
+from routes.expense import router as expense_router
 api_router = APIRouter()
 
 
@@ -22,3 +23,4 @@ api_router.include_router(dashboard_router)
 api_router.include_router(broadcast_router)
 api_router.include_router(shop_router)
 api_router.include_router(reports_router)
+api_router.include_router(expense_router)

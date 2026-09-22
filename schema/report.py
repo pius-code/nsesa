@@ -32,8 +32,12 @@ class FinancialReportResponse(BaseModel):
     end_date: str
     shop_name: str
     total_revenue: float
+    revenue: float = 0.0
     total_cogs: float
+    cogs: float = 0.0
     gross_profit: float
+    expenses: float = 0.0
+    net_profit: float = 0.0
     profit_margin_pct: float
     total_transactions: int
     avg_transaction_value: float

@@ -6,6 +6,7 @@ from beanie.operators import In
 from fastapi import HTTPException
 from model.Transaction import Transaction
 from model.TransactionAudit import TransactionAudit
+from model.Expense import Expense
 from schema.report import (
     FinancialReportResponse,
     ReportMetricItem,
@@ -291,14 +292,28 @@ async def get_financial_report(
     pending_count = pending_result[0]["count"] if pending_result else 0
     pending_value = pending_result[0]["value"] if pending_result else 0.0
 
+    # 6. Expenses in Period
+    expense_items = await Expense.find(
+        Expense.shop_name == shop_name,
+        Expense.is_deleted == False,
+        Expense.date >= start_dt,
+        Expense.date < end_dt,
+    ).to_list()
+    total_expenses = round(sum(e.amount for e in expense_items), 2)
+    net_profit = round(gross_profit - total_expenses, 2)
+
     return FinancialReportResponse(
         period=period,
         start_date=start_dt.strftime("%Y-%m-%d"),
         end_date=(end_dt - timedelta(days=1)).strftime("%Y-%m-%d"),
         shop_name=shop_name,
         total_revenue=round(total_revenue, 2),
+        revenue=round(total_revenue, 2),
         total_cogs=round(total_cogs, 2),
+        cogs=round(total_cogs, 2),
         gross_profit=round(gross_profit, 2),
+        expenses=total_expenses,
+        net_profit=net_profit,
         profit_margin_pct=profit_margin_pct,
         total_transactions=total_transactions,
         avg_transaction_value=avg_tx_value,
@@ -386,21 +401,25 @@ def generate_pdf_report(report: FinancialReportResponse) -> bytes:
             Paragraph("<b>Total Revenue</b>", header_cell_style),
             Paragraph("<b>Cost of Goods (COGS)</b>", header_cell_style),
             Paragraph("<b>Gross Profit</b>", header_cell_style),
-            Paragraph("<b>Profit Margin</b>", header_cell_style),
+            Paragraph("<b>Expenses</b>", header_cell_style),
+            Paragraph("<b>Net Profit</b>", header_cell_style),
         ],
         [
-            Paragraph(f"GHS {report.total_revenue:,.2f}", title_style),
+            Paragraph(f"GHS {report.total_revenue:,.2f}", cell_style),
             Paragraph(f"GHS {report.total_cogs:,.2f}", cell_style),
-            Paragraph(f"<b>GHS {report.gross_profit:,.2f}</b>", title_style),
-            Paragraph(f"<b>{report.profit_margin_pct:.1f}%</b>", title_style),
+            Paragraph(f"GHS {report.gross_profit:,.2f}", cell_style),
+            Paragraph(f"GHS {report.expenses:,.2f}", cell_style),
+            Paragraph(f"<b>GHS {report.net_profit:,.2f}</b>", title_style),
         ],
         [
+            Paragraph("<b>Profit Margin</b>", header_cell_style),
             Paragraph("<b>Transactions</b>", header_cell_style),
             Paragraph("<b>Avg Order Value</b>", header_cell_style),
             Paragraph("<b>Refunds Total</b>", header_cell_style),
             Paragraph("<b>Pending Tabs</b>", header_cell_style),
         ],
         [
+            Paragraph(f"<b>{report.profit_margin_pct:.1f}%</b>", cell_style),
             Paragraph(f"{report.total_transactions}", cell_style),
             Paragraph(f"GHS {report.avg_transaction_value:,.2f}", cell_style),
             Paragraph(f"GHS {report.refund_value:,.2f} ({report.refund_count})", cell_style),
@@ -408,7 +427,7 @@ def generate_pdf_report(report: FinancialReportResponse) -> bytes:
         ],
     ]
 
-    summary_table = Table(summary_data, colWidths=[130, 130, 140, 140])
+    summary_table = Table(summary_data, colWidths=[108, 108, 108, 108, 108])
     summary_table.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
