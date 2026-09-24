@@ -21,6 +21,7 @@ class TransactionCreate(BaseModel):
     payment_mode: Optional[str] = None
     processed_by: str  # worker name
     processed_by_id: Optional[str] = None
+    branch_name: Optional[str] = None
     send_sms: bool = False
     pay_later: bool = False  # open tab — saved as "pending", no payment mode/SMS yet # noqa
     note: Optional[str] = Field(None, example="No pepper, extra sugar-free syrup") # noqa

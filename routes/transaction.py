@@ -41,13 +41,14 @@ async def get_my_shop_transactions(
     end_date: str | None = Query(default=None, description="YYYY-MM-DD, inclusive"), # noqa
     processed_by: str | None = Query(default=None, description="Filter by worker name"), # noqa
     status: str | None = Query(default=None, description="success | returned | rejected"), # noqa
+    branch_name: str | None = Query(default=None, description="Filter by branch name"), # noqa
 ):
-    """Get transactions for my shop, optionally filtered by date range / worker / status""" # noqa
+    """Get transactions for my shop, optionally filtered by date range / worker / status / branch""" # noqa
     current_user = await get_current_user(request)
     shop_name = await get_stakeholder_worker_shop_name(str(current_user.get("sub"))) # noqa
     return await fetch_shop_transactions(
         shop_name=shop_name, start_date=start_date, end_date=end_date, # type: ignore # noqa
-        processed_by=processed_by, status=status,
+        processed_by=processed_by, status=status, branch_name=branch_name,
     )
 
 

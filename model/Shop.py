@@ -9,6 +9,7 @@ class Shop(Document):
     status_reason: str | None = None
     status_changed_by: str | None = None
     status_changed_at: datetime | None = None
+    sms_sent_count: int = 0
     created_at: datetime = datetime.now(timezone.utc)
     updated_at: datetime = datetime.now(timezone.utc)
 

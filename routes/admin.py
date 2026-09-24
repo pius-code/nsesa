@@ -1,23 +1,32 @@
 from fastapi import APIRouter, Depends, Query
 from schema.inventory import InventoryCreate, InventoryUpdate
 from repository.inventory import add_to_shop_inventory, update_inventory_item
-from middleware.auth import admin_protected_route, super_admin_protected_route
+from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user
 from schema.stakeholder import adminStakeholderCreateWorker, ShopImageUpdate
-from repository.stakeholder import create_worker_by_admin, get_workers_by_shop, get_stakeholder_worker_shop_name, update_shop_image, get_all_shops # noqa
+from repository.stakeholder import (
+    create_worker_by_admin,
+    get_workers_by_shop,
+    get_stakeholder_worker_shop_name,
+    update_shop_image,
+    get_all_shops,
+    get_shop_details_for_super_admin,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 
 
 @router.post("/add_to_inventory")
-async def add_to_inventory(payload: InventoryCreate, admin =Depends(admin_protected_route)):  # noqa
-    """Save a new inventory item to the database"""
-    return await add_to_shop_inventory(payload, admin)  # type: ignore
+async def add_to_inventory(payload: InventoryCreate, user=Depends(get_current_user)):  # noqa
+    """Save a new inventory item to the database (admin or branch worker)"""
+    user_id = str(user.get("sub"))
+    return await add_to_shop_inventory(payload, user_id)  # type: ignore
 
 
 @router.patch("/inventory/update_stock/{inventory_id}")
-async def restock_inventory(inventory_id: str, payload: InventoryUpdate, admin=Depends(admin_protected_route)):  # noqa
-    """Update an inventory item — stock, price, name, SKU, and/or category (any subset)""" # noqa
-    return await update_inventory_item(inventory_id, payload, admin)  # type: ignore # noqa
+async def restock_inventory(inventory_id: str, payload: InventoryUpdate, user=Depends(get_current_user)):  # noqa
+    """Update an inventory item — stock, price, name, SKU, and/or category""" # noqa
+    user_id = str(user.get("sub"))
+    return await update_inventory_item(inventory_id, payload, user_id)  # type: ignore # noqa
 
 
 @router.post("/create_worker")
@@ -40,6 +49,15 @@ async def all_shops(
 ):
     """Super admin only — returns paginated shops with worker counts"""
     return await get_all_shops(page=page, limit=limit)
+
+
+@router.get("/admin/shops/{shop_name}/details")
+async def get_shop_details(
+    shop_name: str,
+    super_admin=Depends(super_admin_protected_route),
+):
+    """Super admin only — comprehensive details for a shop including branches, staff, and SMS usage"""
+    return await get_shop_details_for_super_admin(shop_name)
 
 
 @router.get("/shop_workers")

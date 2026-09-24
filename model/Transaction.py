@@ -33,6 +33,7 @@ class Transaction(Document):
     created_at: datetime = datetime.now(timezone.utc)
     updated_at: datetime = datetime.now(timezone.utc)
     at_shop: str
+    branch_name: Annotated[str | None, Indexed()] = None
 
     @before_event([Replace, Insert, SaveChanges])
     def update_timestamp(self):

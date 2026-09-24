@@ -73,7 +73,7 @@ async def send_shop_broadcast(message: str, admin_id: str, background_tasks: Bac
         raise HTTPException(status_code=400, detail="No customers with a phone number found for this shop") # noqa
 
     phone_numbers = [r["phone"] for r in recipients]
-    background_tasks.add_task(send_broadcast_sms, phone_numbers, message)
+    background_tasks.add_task(send_broadcast_sms, phone_numbers, message, shop_name)
     return {
         "message": f"Broadcast queued to {len(recipients)} customer(s)",
         "recipient_count": len(recipients),

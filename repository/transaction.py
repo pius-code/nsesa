@@ -117,7 +117,8 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         note=payload.note,
         processed_by=payload.processed_by,
         processed_by_id=payload.processed_by_id,
-        at_shop=shop_name
+        at_shop=shop_name,
+        branch_name=payload.branch_name or (worker.worker_branch_name if worker else None),
     )
     await new_transaction.insert()  # noqa
 
@@ -158,14 +159,17 @@ async def get_my_shop_transactions(
     end_date: str | None = None,
     processed_by: str | None = None,
     status: str | None = None,
+    branch_name: str | None = None,
 ):
-    """Get transactions for my shop, optionally filtered by date range / worker / status""" # noqa
+    """Get transactions for my shop, optionally filtered by date range / worker / status / branch""" # noqa
     filters = [Transaction.at_shop == shop_name, _not_deleted()]
 
     if status:
         filters.append(Transaction.status == status)
     if processed_by:
         filters.append(Transaction.processed_by == processed_by)
+    if branch_name and branch_name.lower() != "all":
+        filters.append(Transaction.branch_name == branch_name)
     if start_date:
         try:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) # noqa

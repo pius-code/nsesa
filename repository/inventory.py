@@ -24,7 +24,10 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
         return {"message": "Unauthorized to add inventory items"}  # noqa
     worker_admin_shop_name = worker_admin.worker_shop_name
 
-    category = await _resolve_category(payload.category_id, worker_admin_shop_name) # noqa
+    if worker_admin.worker_role not in ["admin", "super_admin"]:
+        branch_name = worker_admin.worker_branch_name or None
+    else:
+        branch_name = payload.branch_name.strip() if payload.branch_name else (worker_admin.worker_branch_name or None)
 
     new_inventory_item = Inventory(
         product_name=payload.product_name,
@@ -34,6 +37,7 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
         sku=payload.sku or None,
         created_by=admin,
         worker_shop_name=worker_admin_shop_name,
+        branch_name=branch_name,
         category_id=str(category.id) if category else None,
         category_name=category.name if category else None,
         supplier_name=payload.supplier_name or None,
@@ -49,11 +53,19 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
     }
 
 
-async def get_all_inventory_items_for_shop(worker_id: str):
+async def get_all_inventory_items_for_shop(worker_id: str, branch_name: str | None = None):
     worker = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(worker_id))  # noqa
     if not worker:
         return {"message": "Unauthorized to view inventory items"}  # noqa
-    items = await Inventory.find(Inventory.worker_shop_name == worker.worker_shop_name, Inventory.is_deleted == False).to_list() # noqa
+    filters = [Inventory.worker_shop_name == worker.worker_shop_name, Inventory.is_deleted == False] # noqa
+
+    if worker.worker_role not in ("admin", "super_admin"):
+        if worker.worker_branch_name:
+            filters.append(Inventory.branch_name == worker.worker_branch_name)
+    elif branch_name and branch_name.lower() != "all":
+        filters.append(Inventory.branch_name == branch_name)
+
+    items = await Inventory.find(*filters).sort(-Inventory.updated_at).to_list()
     return items
 
 
@@ -68,6 +80,10 @@ async def update_inventory_item(inventory_id: str, payload: InventoryUpdate, adm
 
     if item.worker_shop_name != admin_record.worker_shop_name:
         raise HTTPException(status_code=403, detail="Item does not belong to your shop")  # noqa
+
+    if admin_record.worker_role not in ["admin", "super_admin"]:
+        if item.branch_name and admin_record.worker_branch_name and item.branch_name != admin_record.worker_branch_name:
+            raise HTTPException(status_code=403, detail="Cannot edit stock for another branch")
 
     update_data = payload.model_dump(exclude_none=True)
 

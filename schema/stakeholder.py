@@ -23,6 +23,7 @@ class StakeholderCreate(BaseModel):
 class adminStakeholderCreateWorker(BaseModel):
     worker_name: str
     worker_role: str  # "admin" | "worker"
+    worker_branch_name: Optional[str] = None
     worker_email: str
     worker_phone: Optional[str] = None
     worker_password: str   # default to admin for this schema

@@ -14,6 +14,18 @@ SMS_SENDER_ID = os.getenv("SMS_SENDER_ID", "Nsesa")
 DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
+async def _record_sms_usage(shop_name: str | None, count: int = 1):
+    if not shop_name:
+        return
+    try:
+        from model.Shop import Shop
+        shop = await Shop.find_one(Shop.name == shop_name)
+        if shop:
+            await shop.inc({Shop.sms_sent_count: count})
+    except Exception as e:
+        print(f"[SMS Tracking Error] Failed to update sms count for {shop_name}: {e}")
+
+
 async def send_transaction_receipt_sms(
     phone_number: str,
     customer_name: str,
@@ -46,6 +58,7 @@ async def send_transaction_receipt_sms(
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.get(ARKESEL_URL, params=params)
             print(f"[SMS] {phone_number} — {response.text}")
+            await _record_sms_usage(shop_name, 1)
             return response
     except Exception as e:
         print(f"[SMS Error] Failed to send receipt SMS to {phone_number}: {e}")
@@ -80,13 +93,14 @@ async def send_refund_notice_sms(
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.get(ARKESEL_URL, params=params)
             print(f"[SMS] refund notice {phone_number} — {response.text}")
+            await _record_sms_usage(shop_name, 1)
             return response
     except Exception as e:
         print(f"[SMS Error] Failed to send refund notice SMS to {phone_number}: {e}") # noqa
         return None
 
 
-async def _send_raw_sms(phone_number: str, message: str):
+async def _send_raw_sms(phone_number: str, message: str, shop_name: str | None = None):
     params = {
         "action": "send-sms",
         "api_key": ARKESEL_API_KEY,
@@ -98,17 +112,19 @@ async def _send_raw_sms(phone_number: str, message: str):
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.get(ARKESEL_URL, params=params)
             print(f"[SMS] broadcast {phone_number} — {response.text}")
+            if shop_name:
+                await _record_sms_usage(shop_name, 1)
             return response
     except Exception as e:
         print(f"[SMS Error] Failed to send broadcast SMS to {phone_number}: {e}") # noqa
         return None
 
 
-async def send_broadcast_sms(phone_numbers: list[str], message: str):
+async def send_broadcast_sms(phone_numbers: list[str], message: str, shop_name: str | None = None):
     # Runs as a background task — fires all sends concurrently so a large
     # customer list doesn't hold up the request or take minutes to work through. # noqa
     await asyncio.gather(
-        *(_send_raw_sms(number, message) for number in phone_numbers),
+        *(_send_raw_sms(number, message, shop_name) for number in phone_numbers),
         return_exceptions=True,
     )
 

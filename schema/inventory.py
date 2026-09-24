@@ -11,6 +11,7 @@ class InventoryCreate(BaseModel):
     category_id: Optional[str] = Field(None, example="665f1b2c3a4d5e6f7a8b9c0d")
     supplier_name: Optional[str] = Field(None, example="ABC Wholesale")
     supplier_contact: Optional[str] = Field(None, example="+233240000000")
+    branch_name: Optional[str] = Field(None, example="Osu Branch")
 
 
 class InventoryUpdate(BaseModel):
@@ -22,6 +23,7 @@ class InventoryUpdate(BaseModel):
     category_id: Optional[str] = Field(None, example="665f1b2c3a4d5e6f7a8b9c0d")
     supplier_name: Optional[str] = Field(None, example="ABC Wholesale")
     supplier_contact: Optional[str] = Field(None, example="+233240000000")
+    branch_name: Optional[str] = Field(None, example="Osu Branch")
 
 
 class BulkImportRowResult(BaseModel):

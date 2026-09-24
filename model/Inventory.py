@@ -15,6 +15,7 @@ class Inventory(Document):
     category_name: str | None = None
     supplier_name: str | None = None
     supplier_contact: str | None = None
+    branch_name: Annotated[str | None, Indexed()] = None
     is_available: bool = True  # flips to False when amount_available hits 0
     created_at: datetime = datetime.now(timezone.utc)
     updated_at: datetime = datetime.now(timezone.utc)
@@ -29,7 +30,7 @@ class Inventory(Document):
         name = "inventory"
         indexes = [
             IndexModel(
-                [("worker_shop_name", ASCENDING), ("sku", ASCENDING)],
+                [("worker_shop_name", ASCENDING), ("branch_name", ASCENDING), ("sku", ASCENDING)],
                 unique=True,
                 partialFilterExpression={"sku": {"$type": "string"}},
             )

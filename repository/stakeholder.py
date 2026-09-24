@@ -2,6 +2,9 @@ from utils.hasher import hashPwd
 from fastapi import HTTPException
 from model.Stakeholder import Stakeholder
 from model.Shop import Shop
+from model.Branch import Branch
+from model.Inventory import Inventory
+from model.Transaction import Transaction
 from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse, ShopImageUpdate # noqa
 from beanie.operators import In
 from beanie import PydanticObjectId
@@ -66,10 +69,11 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
         raise HTTPException(status_code=400, detail="Invalid!, try changing the email!") # noqa
     if worker_admin.worker_role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Only admins can create workers") # noqa
+    branch_name = payload.worker_branch_name.strip() if payload.worker_branch_name else worker_admin.worker_branch_name
     new_worker = Stakeholder(
         worker_name=payload.worker_name,
         worker_shop_name=worker_admin.worker_shop_name,  # noqa
-        worker_branch_name=worker_admin.worker_branch_name,  # noqa
+        worker_branch_name=branch_name,  # noqa
         worker_role=payload.worker_role,
         worker_email=payload.worker_email,
         worker_phone=payload.worker_phone,
@@ -179,6 +183,10 @@ async def get_all_shops(page: int = 1, limit: int = 10):
             Stakeholder.worker_shop_name == admin.worker_shop_name,
             Stakeholder.worker_role == "worker",
         ).count()
+        branch_count = await Branch.find(
+            Branch.shop_name == admin.worker_shop_name,
+            Branch.is_active == True,
+        ).count()
         shop_doc = await Shop.find_one(Shop.name == admin.worker_shop_name)
         shops.append({
             "shop_name": admin.worker_shop_name,
@@ -187,6 +195,8 @@ async def get_all_shops(page: int = 1, limit: int = 10):
             "admin_email": admin.worker_email,
             "admin_phone": admin.worker_phone,
             "worker_count": worker_count,
+            "branch_count": branch_count,
+            "sms_sent_count": shop_doc.sms_sent_count if shop_doc else 0,
             "created_at": admin.created_at,
             "status": shop_doc.status if shop_doc else "active",
             "status_reason": shop_doc.status_reason if shop_doc else None,
@@ -198,4 +208,92 @@ async def get_all_shops(page: int = 1, limit: int = 10):
         "limit": limit,
         "total_pages": -(-total_shops // limit),
         "shops": shops,
+    }
+
+
+async def get_shop_details_for_super_admin(shop_name: str) -> dict:
+    shop_doc = await Shop.find_one(Shop.name == shop_name)
+    admin = await Stakeholder.find_one(
+        Stakeholder.worker_shop_name == shop_name,
+        In(Stakeholder.worker_role, ["admin", "super_admin"]),
+    )
+    if not admin:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    branches = await Branch.find(
+        Branch.shop_name == shop_name,
+        Branch.is_active == True,
+    ).sort(-Branch.is_main, Branch.branch_name).to_list()
+
+    branch_details = []
+    for b in branches:
+        w_count = await Stakeholder.find(
+            Stakeholder.worker_shop_name == shop_name,
+            Stakeholder.worker_branch_name == b.branch_name,
+            Stakeholder.is_active == True,
+        ).count()
+        inv_count = await Inventory.find(
+            Inventory.worker_shop_name == shop_name,
+            Inventory.branch_name == b.branch_name,
+            Inventory.is_deleted == False,
+        ).count()
+        # Sum sales volume for this branch
+        tx_sum_pipeline = [
+            {"$match": {"at_shop": shop_name, "branch_name": b.branch_name, "status": "success", "$or": [{"is_deleted": False}, {"is_deleted": None}]}},
+            {"$group": {"_id": None, "total": {"$sum": "$total_price"}}}
+        ]
+        tx_res = await Transaction.get_pymongo_collection().aggregate(tx_sum_pipeline).to_list(1)
+        sales_vol = tx_res[0]["total"] if tx_res else 0.0
+
+        branch_details.append({
+            "id": str(b.id),
+            "branch_name": b.branch_name,
+            "location": b.location,
+            "phone": b.phone,
+            "is_main": b.is_main,
+            "worker_count": w_count,
+            "inventory_count": inv_count,
+            "sales_volume": round(sales_vol, 2),
+        })
+
+    workers = await Stakeholder.find(
+        Stakeholder.worker_shop_name == shop_name,
+    ).sort(Stakeholder.worker_name).to_list()
+
+    worker_list = [
+        {
+            "id": str(w.id),
+            "worker_name": w.worker_name,
+            "worker_email": w.worker_email,
+            "worker_role": w.worker_role,
+            "worker_branch_name": w.worker_branch_name,
+            "worker_phone": w.worker_phone,
+            "is_active": w.is_active,
+        }
+        for w in workers
+    ]
+
+    # Total shop revenue
+    total_tx_pipeline = [
+        {"$match": {"at_shop": shop_name, "status": "success", "$or": [{"is_deleted": False}, {"is_deleted": None}]}},
+        {"$group": {"_id": None, "total": {"$sum": "$total_price"}, "count": {"$sum": 1}}}
+    ]
+    tot_res = await Transaction.get_pymongo_collection().aggregate(total_tx_pipeline).to_list(1)
+    tot_revenue = tot_res[0]["total"] if tot_res else 0.0
+    tot_transactions = tot_res[0]["count"] if tot_res else 0
+
+    return {
+        "shop_name": shop_name,
+        "shop_image": admin.worker_shop_image,
+        "admin_name": admin.worker_name,
+        "admin_email": admin.worker_email,
+        "admin_phone": admin.worker_phone,
+        "status": shop_doc.status if shop_doc else "active",
+        "status_reason": shop_doc.status_reason if shop_doc else None,
+        "sms_sent_count": shop_doc.sms_sent_count if shop_doc else 0,
+        "total_revenue": round(tot_revenue, 2),
+        "total_transactions": tot_transactions,
+        "branches": branch_details,
+        "workers": worker_list,
+        "created_at": admin.created_at,
     }
