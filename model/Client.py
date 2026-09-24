@@ -9,6 +9,7 @@ class Client(Document):
     client_phone: str | None = None
     client_email: str | None = None
     worker_shop_name: Annotated[str, Indexed()]
+    branch_name: Annotated[str | None, Indexed()] = None
     notes: str | None = None
     created_by: str
     is_deleted: bool = False

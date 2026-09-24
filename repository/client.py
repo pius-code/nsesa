@@ -28,7 +28,11 @@ async def _get_worker_shop(worker_id: str) -> str:
 
 
 async def create_client(payload: ClientCreate, worker_id: str):
-    shop_name = await _get_worker_shop(worker_id)
+    worker = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(worker_id)) # noqa
+    if not worker:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    shop_name = worker.worker_shop_name
+    branch_name = worker.worker_branch_name or None
 
     new_client = Client(
         client_name=payload.client_name,
@@ -36,6 +40,7 @@ async def create_client(payload: ClientCreate, worker_id: str):
         client_email=payload.client_email or None,
         notes=payload.notes,
         worker_shop_name=shop_name,
+        branch_name=branch_name,
         created_by=worker_id,
     )
     try:

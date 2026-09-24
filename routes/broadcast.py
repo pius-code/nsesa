@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Query
 from schema.broadcast import BroadcastSmsRequest
 from repository.broadcast import (
     send_shop_broadcast,
@@ -6,21 +6,30 @@ from repository.broadcast import (
     count_shop_admin_recipients,
     send_shop_admin_broadcast,
 )
-from middleware.auth import admin_protected_route, super_admin_protected_route
+from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user
 
 router = APIRouter(prefix="/api/v1/broadcast", tags=["broadcast"])
 
 
 @router.get("/recipients-count")
-async def get_recipients_count(admin=Depends(admin_protected_route)): # noqa
-    """Admin only — how many customers a broadcast would reach right now"""
-    return await count_broadcast_recipients(admin)
+async def get_recipients_count(
+    branch_name: str | None = Query(default=None, description="Optional branch filter"),
+    user=Depends(get_current_user),
+):
+    """How many customers a broadcast would reach right now (optionally filtered by branch)"""
+    user_id = str(user.get("sub"))
+    return await count_broadcast_recipients(user_id, branch_name)
 
 
 @router.post("/sms")
-async def broadcast_sms(payload: BroadcastSmsRequest, background_tasks: BackgroundTasks, admin=Depends(admin_protected_route)): # noqa
-    """Admin only — send a custom SMS to every customer who's ever bought from this shop""" # noqa
-    return await send_shop_broadcast(payload.message, admin, background_tasks)
+async def broadcast_sms(
+    payload: BroadcastSmsRequest,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+):
+    """Send SMS to customers (optionally targeted by branch)"""
+    user_id = str(user.get("sub"))
+    return await send_shop_broadcast(payload.message, user_id, background_tasks, payload.branch_name)
 
 
 @router.get("/shop-admins/recipients-count")
