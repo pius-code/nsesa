@@ -29,6 +29,8 @@ async def add_to_shop_inventory(payload: InventoryCreate, admin: str):
     else:
         branch_name = payload.branch_name.strip() if payload.branch_name else (worker_admin.worker_branch_name or None)
 
+    category = await _resolve_category(payload.category_id, worker_admin_shop_name)
+
     new_inventory_item = Inventory(
         product_name=payload.product_name,
         product_price=payload.product_price,
