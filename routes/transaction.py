@@ -24,8 +24,9 @@ router = APIRouter(prefix="/api/v1", tags=["transaction"])
 async def create_transaction(payload: TransactionCreate, request: Request, background_tasks: BackgroundTasks):  # noqa
     """Save a new transaction to the database"""
     current_user = await get_current_user(request)
-    shop_name = await get_stakeholder_worker_shop_name(str(current_user.get("sub"))) # noqa
-    return await save_an_nsesa_transaction(payload, shop_name=shop_name, background_tasks=background_tasks)  # type: ignore # noqa
+    user_id = str(current_user.get("sub"))
+    shop_name = await get_stakeholder_worker_shop_name(user_id) # noqa
+    return await save_an_nsesa_transaction(payload, shop_name=shop_name, background_tasks=background_tasks, user_id=user_id)  # type: ignore # noqa
 
 
 @router.get("/receipt/{receipt_id}")

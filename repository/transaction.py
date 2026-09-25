@@ -25,7 +25,7 @@ def _slugify_shop_name(shop_name: str) -> str:
     return slug.lower() or "shop"
 
 
-async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, background_tasks: BackgroundTasks = None): # noqa
+async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, background_tasks: BackgroundTasks = None, user_id: str | None = None): # noqa
     # 1. Fetch and validate inventory items before taking any action
     inventory_items_map = {} # noqa 
     for item in payload.items:
@@ -60,6 +60,14 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
 
     # 4. Save the actual transaction document
     shop_image = None
+    worker = None
+    resolved_worker_id = payload.processed_by_id or user_id
+    if resolved_worker_id:
+        try:
+            worker = await Stakeholder.get(PydanticObjectId(resolved_worker_id))
+        except Exception:
+            worker = None
+
     try:
         admin = await Stakeholder.find_one(
             Stakeholder.worker_shop_name == shop_name,
@@ -67,10 +75,8 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         )
         if admin and admin.worker_shop_image:
             shop_image = admin.worker_shop_image
-        elif payload.processed_by_id:
-            worker = await Stakeholder.get(PydanticObjectId(payload.processed_by_id))
-            if worker:
-                shop_image = worker.worker_shop_image
+        elif worker and worker.worker_shop_image:
+            shop_image = worker.worker_shop_image
     except Exception:
         shop_image = None
 
@@ -118,7 +124,11 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         processed_by=payload.processed_by,
         processed_by_id=payload.processed_by_id,
         at_shop=shop_name,
-        branch_name=payload.branch_name or (worker.worker_branch_name if worker else None),
+        branch_name=(
+            payload.branch_name
+            or (worker.worker_branch_name if worker else None)
+            or next((inv.branch_name for inv in inventory_items_map.values() if inv and inv.branch_name), None)
+        ),
     )
     await new_transaction.insert()  # noqa
 
