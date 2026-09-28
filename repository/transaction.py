@@ -108,6 +108,8 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         item_data["unit_cost"] = cost
         tx_items.append(TransactionItem(**item_data))
 
+    tx_timestamp = payload.created_at if payload.created_at else datetime.now(timezone.utc)
+
     new_transaction = Transaction(
         id=new_id,
         receipt_id=receipt_id,
@@ -124,6 +126,8 @@ async def save_an_nsesa_transaction(payload: TransactionCreate, shop_name: str, 
         processed_by=payload.processed_by,
         processed_by_id=payload.processed_by_id,
         at_shop=shop_name,
+        created_at=tx_timestamp,
+        updated_at=tx_timestamp,
         branch_name=(
             payload.branch_name
             or (worker.worker_branch_name if worker else None)

@@ -16,6 +16,8 @@ from repository.transaction import (
 )
 from middleware.auth import get_current_user, admin_protected_route
 from repository.stakeholder import get_stakeholder_worker_shop_name
+from model.Stakeholder import Stakeholder
+from beanie import PydanticObjectId
 
 router = APIRouter(prefix="/api/v1", tags=["transaction"])
 
@@ -46,10 +48,24 @@ async def get_my_shop_transactions(
 ):
     """Get transactions for my shop, optionally filtered by date range / worker / status / branch""" # noqa
     current_user = await get_current_user(request)
-    shop_name = await get_stakeholder_worker_shop_name(str(current_user.get("sub"))) # noqa
+    user_id = str(current_user.get("sub"))
+    worker = await Stakeholder.get(PydanticObjectId(user_id))
+    if not worker:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    effective_processed_by = processed_by
+    if worker.worker_role == "worker":
+        # Workers can strictly only view transactions they processed
+        effective_processed_by = worker.worker_name
+
     return await fetch_shop_transactions(
-        shop_name=shop_name, start_date=start_date, end_date=end_date, # type: ignore # noqa
-        processed_by=processed_by, status=status, branch_name=branch_name,
+        shop_name=worker.worker_shop_name,
+        start_date=start_date,
+        end_date=end_date,
+        processed_by=effective_processed_by,
+        status=status,
+        branch_name=branch_name,
     )
 
 
@@ -81,8 +97,16 @@ async def get_transaction_audit(transaction_id: str, admin=Depends(admin_protect
 async def list_processed_by_options(request: Request):
     """Any authenticated user — distinct worker names for the Person filter""" # noqa
     current_user = await get_current_user(request)
-    shop_name = await get_stakeholder_worker_shop_name(str(current_user.get("sub"))) # noqa
-    return await get_processed_by_options(shop_name)  # type: ignore
+    user_id = str(current_user.get("sub"))
+    worker = await Stakeholder.get(PydanticObjectId(user_id))
+    if not worker:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if worker.worker_role == "worker":
+        return [worker.worker_name]
+
+    return await get_processed_by_options(worker.worker_shop_name)
 
 
 @router.post("/transactions/{transaction_id}/resend-receipt")

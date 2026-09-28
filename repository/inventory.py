@@ -1,10 +1,18 @@
 from model.Inventory import Inventory
 from model.Category import Category
-from schema.inventory import InventoryCreate, InventoryUpdate, BulkImportRowResult, BulkImportResponse # noqa
+from model.StockMovement import StockMovement
+from schema.inventory import (
+    InventoryCreate,
+    InventoryUpdate,
+    InventoryRestockRequest,
+    BulkImportRowResult,
+    BulkImportResponse,
+)
 from beanie import PydanticObjectId
 from model.Stakeholder import Stakeholder
 from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError
+from datetime import datetime, timezone
 import csv
 import io
 
@@ -216,3 +224,69 @@ async def bulk_import_inventory(file_bytes: bytes, admin: str) -> BulkImportResp
         skipped=len(results) - created,
         results=results,
     )
+
+
+async def restock_inventory_item(inventory_id: str, payload: InventoryRestockRequest, admin: str):
+    worker_admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin))
+    if not worker_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    item = await Inventory.get(PydanticObjectId(inventory_id))
+    if not item or item.is_deleted:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+
+    if item.worker_shop_name != worker_admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="Item does not belong to your shop")
+
+    prev_qty = item.amount_available
+    new_qty = prev_qty + payload.added_quantity
+    item.amount_available = new_qty
+    item.is_available = new_qty > 0
+    await item.save()
+
+    reason = payload.reason.strip() if payload.reason and payload.reason.strip() else "No reason given"
+    ts = payload.restock_date or datetime.now(timezone.utc)
+
+    movement = StockMovement(
+        product_id=str(item.id),
+        product_name=item.product_name,
+        sku=item.sku,
+        shop_name=worker_admin.worker_shop_name,
+        branch_name=item.branch_name or worker_admin.worker_branch_name or "Main Branch",
+        movement_type="RESTOCK",
+        quantity_change=payload.added_quantity,
+        previous_quantity=prev_qty,
+        new_quantity=new_qty,
+        unit_cost=item.cost_price or 0.0,
+        unit_price=item.product_price,
+        performed_by_id=str(worker_admin.id),
+        performed_by_name=worker_admin.worker_name,
+        reason=reason,
+        created_at=ts,
+    )
+    await movement.insert()
+
+    return {
+        "message": f"Successfully added {payload.added_quantity} units to stock.",
+        "previous_quantity": prev_qty,
+        "added_quantity": payload.added_quantity,
+        "new_quantity": new_qty,
+        "item": item,
+    }
+
+
+async def get_product_stock_logs(inventory_id: str, admin: str):
+    worker_admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin))
+    if not worker_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    item = await Inventory.get(PydanticObjectId(inventory_id))
+    if not item or item.is_deleted or item.worker_shop_name != worker_admin.worker_shop_name:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+
+    logs = await StockMovement.find(
+        StockMovement.product_id == str(item.id),
+        StockMovement.shop_name == worker_admin.worker_shop_name,
+    ).sort(-StockMovement.created_at).to_list()
+
+    return logs

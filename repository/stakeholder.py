@@ -133,13 +133,56 @@ async def update_stakeholder(worker_id: str, payload: StakeholderUpdate):
 
 
 async def deactivate_stakeholder(worker_id: str):
-    worker = await Stakeholder.get(worker_id)
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     worker.is_active = False
     await worker.save()
     return {"message": "Worker deactivated successfully"}
+
+
+async def toggle_worker_status(worker_id: str, admin_id: str):
+    if str(worker_id) == str(admin_id):
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+
+    admin = await Stakeholder.get(PydanticObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if admin.worker_role != "super_admin" and worker.worker_shop_name != admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this worker")
+
+    worker.is_active = not worker.is_active
+    await worker.save()
+    status_label = "activated" if worker.is_active else "deactivated"
+    return {
+        "message": f"Worker account {status_label} successfully",
+        "is_active": worker.is_active,
+    }
+
+
+async def delete_worker_by_admin(worker_id: str, admin_id: str):
+    if str(worker_id) == str(admin_id):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    admin = await Stakeholder.get(PydanticObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if admin.worker_role != "super_admin" and worker.worker_shop_name != admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this worker")
+
+    await worker.delete()
+    return {"message": "Worker account deleted successfully"}
 
 
 async def get_Stakeholder_by_email(email: str):
@@ -297,3 +340,49 @@ async def get_shop_details_for_super_admin(shop_name: str) -> dict:
         "workers": worker_list,
         "created_at": admin.created_at,
     }
+
+
+async def toggle_worker_status(worker_id: str, admin_id: str):
+    admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if str(admin.id) == str(worker_id):
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
+
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if admin.worker_role != "super_admin" and worker.worker_shop_name != admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="Worker does not belong to your shop")
+
+    worker.is_active = not worker.is_active
+    await worker.save()
+    status_str = "activated" if worker.is_active else "deactivated"
+    return {
+        "message": f"Worker '{worker.worker_name}' has been {status_str}.",
+        "worker": _to_response(worker),
+    }
+
+
+async def delete_worker_by_admin(worker_id: str, admin_id: str):
+    admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if str(admin.id) == str(worker_id):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account.")
+
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if admin.worker_role != "super_admin" and worker.worker_shop_name != admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="Worker does not belong to your shop")
+
+    if worker.worker_role in ("admin", "super_admin", "owner") and admin.worker_role != "super_admin":
+        raise HTTPException(status_code=403, detail="Cannot delete an admin account.")
+
+    await worker.delete()
+    return {"message": f"Worker '{worker.worker_name}' removed successfully."}

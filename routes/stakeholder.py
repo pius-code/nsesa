@@ -29,6 +29,12 @@ async def login_stakeholder(payload: StakeholderLogin):
     if not verifyPwd(payload.worker_password, str(hashed_password)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    if not stakeholder.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account has been deactivated. Please contact your store administrator.",
+        )
+
     shop = await get_shop_status(stakeholder.worker_shop_name)
     if shop and shop.status != "active":
         verb = "deleted" if shop.status == "deleted" else "suspended"

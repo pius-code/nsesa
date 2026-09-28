@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import datetime
 
 
 class InventoryCreate(BaseModel):
@@ -24,6 +25,12 @@ class InventoryUpdate(BaseModel):
     supplier_name: Optional[str] = Field(None, example="ABC Wholesale")
     supplier_contact: Optional[str] = Field(None, example="+233240000000")
     branch_name: Optional[str] = Field(None, example="Osu Branch")
+
+
+class InventoryRestockRequest(BaseModel):
+    added_quantity: int = Field(..., gt=0, example=50)
+    reason: Optional[str] = Field("No reason given", example="Restocked from Accra wholesale")
+    restock_date: Optional[datetime] = None
 
 
 class BulkImportRowResult(BaseModel):
