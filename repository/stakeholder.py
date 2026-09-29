@@ -5,7 +5,11 @@ from model.Shop import Shop
 from model.Branch import Branch
 from model.Inventory import Inventory
 from model.Transaction import Transaction
-from schema.stakeholder import StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate, StakeholderResponse, ShopImageUpdate # noqa
+from schema.stakeholder import (
+    StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate,
+    StakeholderResponse, ShopImageUpdate, WorkerPermissionsUpdate,
+    admin_permissions, worker_default_permissions,
+) # noqa
 from beanie.operators import In
 from beanie import PydanticObjectId
 
@@ -17,9 +21,11 @@ def _to_response(w: Stakeholder) -> StakeholderResponse:
         worker_shop_name=w.worker_shop_name,
         worker_branch_name=w.worker_branch_name,
         worker_role=w.worker_role,
+        role_label=w.role_label or "",
         worker_email=w.worker_email,
         worker_phone=w.worker_phone,
         worker_shop_image=w.worker_shop_image,
+        permissions=w.permissions or {},
         is_active=w.is_active,
         last_login=w.last_login,
         created_at=w.created_at,
@@ -70,21 +76,76 @@ async def create_worker_by_admin(payload: adminStakeholderCreateWorker, admin: s
     if worker_admin.worker_role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Only admins can create workers") # noqa
     branch_name = payload.worker_branch_name.strip() if payload.worker_branch_name else worker_admin.worker_branch_name
+    # Use provided permissions or default worker permissions
+    perms = payload.permissions.model_dump() if payload.permissions else worker_default_permissions()
     new_worker = Stakeholder(
         worker_name=payload.worker_name,
-        worker_shop_name=worker_admin.worker_shop_name,  # noqa
-        worker_branch_name=branch_name,  # noqa
-        worker_role=payload.worker_role,
+        worker_shop_name=worker_admin.worker_shop_name,
+        worker_branch_name=branch_name,
+        worker_role="worker",  # all workers created via admin are always "worker" role
+        role_label=payload.role_label or "",
         worker_email=payload.worker_email,
         worker_phone=payload.worker_phone,
         worker_hashed_password=hashPwd(payload.worker_password),
         worker_shop_image=worker_admin.worker_shop_image,
+        permissions=perms,
     )
     await new_worker.insert()
     return {
         "message": "Worker created successfully",
         "worker": _to_response(new_worker),
     }
+
+
+async def update_worker_permissions(worker_id: str, admin_id: str, payload: WorkerPermissionsUpdate):
+    """Update permissions (and optionally role_label) for a specific worker. Admin-only."""
+    admin = await Stakeholder.find_one(Stakeholder.id == PydanticObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if str(admin_id) == str(worker_id):
+        raise HTTPException(status_code=400, detail="You cannot change your own permissions")
+
+    worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    # Shop isolation — admin can only modify workers within their own shop
+    if admin.worker_role != "super_admin" and worker.worker_shop_name != admin.worker_shop_name:
+        raise HTTPException(status_code=403, detail="Worker does not belong to your shop")
+
+    # Admins cannot elevate to super_admin level — super_admin check is separate
+    if worker.worker_role in ("admin", "super_admin") and admin.worker_role != "super_admin":
+        raise HTTPException(status_code=403, detail="Cannot modify another admin's permissions")
+
+    worker.permissions = payload.permissions.model_dump()
+    if payload.role_label is not None:
+        worker.role_label = payload.role_label
+    await worker.save()
+    return {
+        "message": f"Permissions updated for '{worker.worker_name}'",
+        "worker": _to_response(worker),
+    }
+
+
+async def migrate_permissions():
+    """
+    One-time migration: assign default permissions to existing workers who have
+    no permissions set yet. Admins get all permissions; workers get can_sell only.
+    Safe to run multiple times — skips workers that already have permissions.
+    """
+    all_workers = await Stakeholder.find_all().to_list()
+    migrated = 0
+    for w in all_workers:
+        if w.permissions:  # already has permissions — skip
+            continue
+        if w.worker_role in ("admin", "super_admin"):
+            w.permissions = admin_permissions()
+        else:
+            w.permissions = worker_default_permissions()
+        await w.save()
+        migrated += 1
+    return {"message": f"Migration complete. {migrated} workers updated."}
 
 
 async def get_workers_by_shop(shop_name: str):

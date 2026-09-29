@@ -6,7 +6,7 @@ from repository.broadcast import (
     count_shop_admin_recipients,
     send_shop_admin_broadcast,
 )
-from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user
+from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user, require_permission, require_any_permission
 
 router = APIRouter(prefix="/api/v1/broadcast", tags=["broadcast"])
 
@@ -14,22 +14,20 @@ router = APIRouter(prefix="/api/v1/broadcast", tags=["broadcast"])
 @router.get("/recipients-count")
 async def get_recipients_count(
     branch_name: str | None = Query(default=None, description="Optional branch filter"),
-    user=Depends(get_current_user),
+    worker_id: str = Depends(require_any_permission("can_sms_own_branch", "can_sms_all_branches")),
 ):
-    """How many customers a broadcast would reach right now (optionally filtered by branch)"""
-    user_id = str(user.get("sub"))
-    return await count_broadcast_recipients(user_id, branch_name)
+    """Permission: can_sms_own_branch or can_sms_all_branches — how many customers a broadcast would reach"""
+    return await count_broadcast_recipients(worker_id, branch_name)
 
 
 @router.post("/sms")
 async def broadcast_sms(
     payload: BroadcastSmsRequest,
     background_tasks: BackgroundTasks,
-    user=Depends(get_current_user),
+    worker_id: str = Depends(require_any_permission("can_sms_own_branch", "can_sms_all_branches")),
 ):
-    """Send SMS to customers (optionally targeted by branch)"""
-    user_id = str(user.get("sub"))
-    return await send_shop_broadcast(payload.message, user_id, background_tasks, payload.branch_name)
+    """Permission: can_sms_own_branch or can_sms_all_branches — send SMS"""
+    return await send_shop_broadcast(payload.message, worker_id, background_tasks, payload.branch_name)
 
 
 @router.get("/shop-admins/recipients-count")

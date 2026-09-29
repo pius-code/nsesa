@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from schema.inventory import InventoryCreate, InventoryUpdate
 from repository.inventory import add_to_shop_inventory, update_inventory_item
-from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user
-from schema.stakeholder import adminStakeholderCreateWorker, ShopImageUpdate
+from middleware.auth import admin_protected_route, super_admin_protected_route, get_current_user, require_permission
+from schema.stakeholder import adminStakeholderCreateWorker, ShopImageUpdate, WorkerPermissionsUpdate
 from schema.shop import ShopProfileUpdate
 from repository.shop import get_shop_profile, update_shop_profile
 from repository.stakeholder import (
@@ -14,22 +14,22 @@ from repository.stakeholder import (
     get_shop_details_for_super_admin,
     toggle_worker_status,
     delete_worker_by_admin,
+    update_worker_permissions,
+    migrate_permissions,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
 
 
 @router.post("/add_to_inventory")
-async def add_to_inventory(payload: InventoryCreate, user=Depends(get_current_user)):  # noqa
-    """Save a new inventory item to the database (admin or branch worker)"""
-    user_id = str(user.get("sub"))
+async def add_to_inventory(payload: InventoryCreate, user_id: str = Depends(require_permission("can_add_inventory"))):  # noqa
+    """Save a new inventory item to the database (requires can_add_inventory)"""
     return await add_to_shop_inventory(payload, user_id)  # type: ignore
 
 
 @router.patch("/inventory/update_stock/{inventory_id}")
-async def restock_inventory(inventory_id: str, payload: InventoryUpdate, user=Depends(get_current_user)):  # noqa
-    """Update an inventory item — stock, price, name, SKU, and/or category""" # noqa
-    user_id = str(user.get("sub"))
+async def restock_inventory(inventory_id: str, payload: InventoryUpdate, user_id: str = Depends(require_permission("can_update_stock"))):  # noqa
+    """Update an inventory item — stock, price, name, SKU, and/or category (requires can_update_stock)""" # noqa
     return await update_inventory_item(inventory_id, payload, user_id)  # type: ignore # noqa
 
 
@@ -106,3 +106,17 @@ async def update_my_shop_profile(payload: ShopProfileUpdate, admin=Depends(admin
     return await update_shop_profile(shop_name, payload)
 
 
+@router.patch("/workers/{worker_id}/permissions")
+async def update_permissions(
+    worker_id: str,
+    payload: WorkerPermissionsUpdate,
+    admin: str = Depends(admin_protected_route),
+):
+    """Update a worker's permissions and/or role label. Admin-only."""
+    return await update_worker_permissions(worker_id, admin, payload)
+
+
+@router.post("/migrate-permissions")
+async def run_permissions_migration(admin=Depends(super_admin_protected_route)):
+    """One-time migration: backfill permissions for all existing workers. Super admin only."""
+    return await migrate_permissions()

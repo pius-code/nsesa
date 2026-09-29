@@ -69,14 +69,21 @@ async def get_all_inventory_items_for_shop(worker_id: str, branch_name: str | No
         return {"message": "Unauthorized to view inventory items"}  # noqa
     filters = [Inventory.worker_shop_name == worker.worker_shop_name, Inventory.is_deleted == False] # noqa
 
-    if worker.worker_role not in ("admin", "super_admin"):
+    perms = worker.permissions or {}
+    is_global = perms.get("is_global", False) or worker.worker_role in ("admin", "super_admin")
+
+    if is_global:
+        # Admins / global workers: apply optional branch filter from query param
+        if branch_name and branch_name.lower() != "all":
+            filters.append(Inventory.branch_name == branch_name)
+    else:
+        # Branch-scoped workers: always see only their own branch's products
         if worker.worker_branch_name:
             filters.append(Inventory.branch_name == worker.worker_branch_name)
-    elif branch_name and branch_name.lower() != "all":
-        filters.append(Inventory.branch_name == branch_name)
 
     items = await Inventory.find(*filters).sort(-Inventory.updated_at).to_list()
     return items
+
 
 
 async def update_inventory_item(inventory_id: str, payload: InventoryUpdate, admin: str): # noqa
