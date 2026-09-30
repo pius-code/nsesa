@@ -114,8 +114,8 @@ def require_permission(perm: str):
     """
     async def _check(request: Request) -> str:
         stakeholder = await _resolve_stakeholder(request)
-        # Super admins bypass everything
-        if stakeholder.worker_role == "super_admin":
+        # Admins and Super Admins bypass permission checks
+        if stakeholder.worker_role in ("admin", "super_admin"):
             return str(stakeholder.id)
         # Check permission flag; fall back to False if field missing (old records)
         perms = stakeholder.permissions or {}
@@ -139,7 +139,8 @@ def require_any_permission(*perms: str):
     """
     async def _check(request: Request) -> str:
         stakeholder = await _resolve_stakeholder(request)
-        if stakeholder.worker_role == "super_admin":
+        # Admins and Super Admins bypass permission checks
+        if stakeholder.worker_role in ("admin", "super_admin"):
             return str(stakeholder.id)
         user_perms = stakeholder.permissions or {}
         if not any(user_perms.get(p, False) for p in perms):
