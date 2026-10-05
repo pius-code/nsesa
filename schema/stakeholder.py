@@ -39,6 +39,10 @@ class WorkerPermissions(BaseModel):
     can_see_clients: bool = False        # Can view client list & details
     can_add_clients: bool = False        # Can create new clients
     can_edit_clients: bool = False       # Can edit client details
+    # Profile
+    can_edit_profile: bool = False       # Can edit their profile name & details
+    # Branches
+    can_manage_branches: bool = False    # Can create and manage shop branches
 
 
 def admin_permissions() -> dict:
@@ -61,6 +65,8 @@ def admin_permissions() -> dict:
         can_see_clients=True,
         can_add_clients=True,
         can_edit_clients=True,
+        can_edit_profile=True,
+        can_manage_branches=True,
     ).model_dump()
 
 
@@ -70,6 +76,21 @@ def worker_default_permissions() -> dict:
         can_sell=True,
         view_own_transactions=True,
     ).model_dump()
+
+
+import re
+from pydantic import field_validator
+
+def validate_password_strength(password: str) -> str:
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Za-z]", password):
+        raise ValueError("Password must contain at least one letter.")
+    if not re.search(r"\d", password):
+        raise ValueError("Password must contain at least one number.")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>\-_=+[\];/]", password):
+        raise ValueError("Password must contain at least one special character/symbol (e.g. !@#$%^&*).")
+    return password
 
 
 class StakeholderCreate(BaseModel):
@@ -82,15 +103,51 @@ class StakeholderCreate(BaseModel):
     worker_password: str
     worker_shop_image: Optional[str] = DEFAULT_SHOP_IMAGE
 
+    @field_validator("worker_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 class adminStakeholderCreateWorker(BaseModel):
     worker_name: str
     role_label: str = ""               # e.g. "Cashier", "Store Manager" — display name
     worker_branch_name: Optional[str] = None
     worker_email: str
-    worker_phone: Optional[str] = None
+    worker_phone: str                  # Required for alerts and reset notifications
     worker_password: str
     permissions: Optional[WorkerPermissions] = None  # None = default worker perms
+
+    @field_validator("worker_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+    reason: str
+    send_sms: bool = True
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 
 class StakeholderLogin(BaseModel):
@@ -132,4 +189,10 @@ class StakeholderResponse(BaseModel):
     last_login: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+
+class ProfileUpdateRequest(BaseModel):
+    worker_phone: str
+    worker_name: Optional[str] = None
+
 

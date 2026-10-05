@@ -8,6 +8,8 @@ from model.Shop import Shop
 from model.Expense import Expense
 from model.Branch import Branch
 from model.StockMovement import StockMovement
+from model.PasswordResetRequest import PasswordResetRequest
+from model.PasswordResetAuditLog import PasswordResetAuditLog
 
 
 Nsesa_model = [
@@ -21,4 +23,7 @@ Nsesa_model = [
     Expense,
     Branch,
     StockMovement,
+    PasswordResetRequest,
+    PasswordResetAuditLog,
 ]
+

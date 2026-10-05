@@ -164,3 +164,45 @@ async def delete_branch(branch_id: str, admin_id: str):
     branch.is_active = False
     await branch.save()
     return {"message": "Branch deactivated successfully"}
+
+
+async def switch_active_branch(user_id: str, branch_name: str | None = None) -> dict:
+    worker = await Stakeholder.get(PydanticObjectId(user_id))
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    perms = worker.permissions or {}
+    is_admin = worker.worker_role in ("admin", "super_admin")
+    can_manage = perms.get("can_manage_branches", False)
+
+    if not (is_admin or can_manage):
+        raise HTTPException(status_code=403, detail="You do not have permission to switch branches")
+
+    shop_name = worker.worker_shop_name
+
+    target_branch = branch_name.strip() if branch_name and branch_name.strip() else None
+
+    if target_branch:
+        branch = await Branch.find_one(
+            Branch.shop_name == shop_name,
+            Branch.branch_name == target_branch,
+            Branch.is_active == True,
+        )
+        if not branch:
+            raise HTTPException(status_code=404, detail=f"Branch '{target_branch}' not found in your shop")
+        worker.worker_branch_name = branch.branch_name
+    else:
+        main_branch = await Branch.find_one(
+            Branch.shop_name == shop_name,
+            Branch.is_main == True,
+            Branch.is_active == True,
+        )
+        worker.worker_branch_name = main_branch.branch_name if main_branch else None
+
+    await worker.save()
+
+    return {
+        "message": f"Successfully switched to branch: {worker.worker_branch_name or 'Main Branch'}",
+        "active_branch": worker.worker_branch_name,
+    }
+

@@ -16,6 +16,7 @@ PUBLIC_PATHS = [
     "/docs",
     "/openapi.json",
     "/api/v1/login",
+    "/api/v1/auth/forgot-password",
 ]
 
 

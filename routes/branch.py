@@ -1,20 +1,33 @@
 from fastapi import APIRouter, Depends
-from schema.branch import BranchCreate, BranchUpdate, BranchResponse
+from schema.branch import BranchCreate, BranchUpdate, BranchResponse, SwitchBranchRequest
 from repository.branch import (
     create_branch,
     get_shop_branches,
     update_branch,
     delete_branch,
+    switch_active_branch,
 )
 from repository.stakeholder import get_stakeholder_worker_shop_name
-from middleware.auth import admin_protected_route, get_current_user
+from middleware.auth import get_current_user, require_any_permission
 
 router = APIRouter(prefix="/api/v1/branches", tags=["branches"])
 
 
+@router.post("/switch")
+async def switch_branch(
+    payload: SwitchBranchRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Switch active operating branch context for the current session"""
+    return await switch_active_branch(user.get("sub"), payload.branch_name)
+
+
 @router.post("", response_model=BranchResponse)
-async def add_branch(payload: BranchCreate, admin_id: str = Depends(admin_protected_route)):
-    """Admin only — create a new branch for their shop"""
+async def add_branch(
+    payload: BranchCreate,
+    admin_id: str = Depends(require_any_permission("can_manage_branches")),
+):
+    """Create a new branch for the shop"""
     return await create_branch(payload, admin_id)
 
 
@@ -31,16 +44,17 @@ async def list_branches(user: dict = Depends(get_current_user)):
 async def edit_branch(
     branch_id: str,
     payload: BranchUpdate,
-    admin_id: str = Depends(admin_protected_route),
+    admin_id: str = Depends(require_any_permission("can_manage_branches")),
 ):
-    """Admin only — update branch information"""
+    """Update branch information"""
     return await update_branch(branch_id, payload, admin_id)
 
 
 @router.delete("/{branch_id}")
 async def remove_branch(
     branch_id: str,
-    admin_id: str = Depends(admin_protected_route),
+    admin_id: str = Depends(require_any_permission("can_manage_branches")),
 ):
-    """Admin only — deactivate a branch"""
+    """Deactivate a branch"""
     return await delete_branch(branch_id, admin_id)
+

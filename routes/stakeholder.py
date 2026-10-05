@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
-from schema.stakeholder import StakeholderCreate, StakeholderLogin, StakeholderResponse # noqa
-from repository.stakeholder import create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password, get_stakeholder_by_id # noqa
+from schema.stakeholder import StakeholderCreate, StakeholderLogin, StakeholderResponse, ProfileUpdateRequest # noqa
+from repository.stakeholder import (
+    create_stakeholder, get_Stakeholder_by_email, get_stakeholder_hashed_password,
+    get_stakeholder_by_id, update_worker_profile,
+) # noqa
 from repository.shop import get_shop_status
 from utils.hasher import verifyPwd
 from helpers.auth import generate_token
@@ -70,5 +73,21 @@ async def login_stakeholder(payload: StakeholderLogin):
 async def get_me(user=Depends(get_current_user)):
     """Fetch the currently logged-in worker's latest profile and live permissions directly from the database"""
     return await get_stakeholder_by_id(user.get("sub"))
+
+
+@router.get("/profile", response_model=StakeholderResponse)
+async def get_profile(user=Depends(get_current_user)):
+    """Fetch the currently logged-in worker's profile"""
+    return await get_stakeholder_by_id(user.get("sub"))
+
+
+@router.put("/profile", response_model=StakeholderResponse)
+async def update_profile(
+    payload: ProfileUpdateRequest,
+    user=Depends(get_current_user)
+):
+    """Update profile details (phone number, and name if permitted)"""
+    return await update_worker_profile(user.get("sub"), payload)
+
 
 

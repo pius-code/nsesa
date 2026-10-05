@@ -128,3 +128,11 @@ async def send_broadcast_sms(phone_numbers: list[str], message: str, shop_name: 
         return_exceptions=True,
     )
 
+
+async def send_worker_sms(phone_number: str, message: str, shop_name: str | None = None):
+    """Send a transactional alert SMS to a worker's phone"""
+    if not phone_number:
+        return None
+    return await _send_raw_sms(phone_number, message, shop_name)
+
+

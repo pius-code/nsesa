@@ -8,10 +8,11 @@ from model.Transaction import Transaction
 from schema.stakeholder import (
     StakeholderCreate, adminStakeholderCreateWorker, StakeholderUpdate,
     StakeholderResponse, ShopImageUpdate, WorkerPermissionsUpdate,
-    admin_permissions, worker_default_permissions,
+    admin_permissions, worker_default_permissions, ProfileUpdateRequest,
 ) # noqa
 from beanie.operators import In
 from beanie import PydanticObjectId
+from datetime import datetime, timezone
 
 
 def _to_response(w: Stakeholder) -> StakeholderResponse:
@@ -447,3 +448,35 @@ async def delete_worker_by_admin(worker_id: str, admin_id: str):
 
     await worker.delete()
     return {"message": f"Worker '{worker.worker_name}' removed successfully."}
+
+
+async def update_worker_profile(worker_id: str, payload: ProfileUpdateRequest) -> StakeholderResponse:
+    try:
+        worker = await Stakeholder.get(PydanticObjectId(worker_id))
+    except Exception:
+        worker = await Stakeholder.get(worker_id)
+
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    clean_phone = payload.worker_phone.strip() if payload.worker_phone else ""
+    if not clean_phone:
+        raise HTTPException(status_code=400, detail="Phone number is required.")
+
+    worker.worker_phone = clean_phone
+
+    if payload.worker_name and payload.worker_name.strip() != worker.worker_name:
+        is_admin = worker.worker_role in ("admin", "super_admin")
+        perms = worker.permissions or {}
+        has_edit_perm = is_admin or perms.get("can_edit_profile", False)
+        if not has_edit_perm:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to edit your name. Please contact your administrator."
+            )
+        worker.worker_name = payload.worker_name.strip()
+
+    worker.updated_at = datetime.now(timezone.utc)
+    await worker.save()
+    return _to_response(worker)
+
