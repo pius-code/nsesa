@@ -27,14 +27,20 @@ app.openapi = lambda: custom_openapi(app)
 app.middleware("http")(verify_token_middleware)
 app.include_router(api_router)
 
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
+# Build the allowed origins list — always include localhost for local dev
+# and explicitly add both the custom domain and the Render URL
+allowed_origins = list({
+    frontend_url,
+    "http://localhost:3000",
+    "https://nsesa.fathersjoytravel.com",
+    "https://nsesa.onrender.com",
+})
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        frontend_url,
-        "http://localhost:3000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
