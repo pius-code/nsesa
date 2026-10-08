@@ -28,6 +28,7 @@ async def verify_token_middleware(request: Request, call_next):
 
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
+        print(f"[AUTH 401] Path: {request.url.path} | Reason: Missing or invalid Authorization header (Header received: '{auth_header}')")
         return JSONResponse(
             status_code=401, content={"detail": "Missing or invalid token"}
         )
@@ -38,7 +39,8 @@ async def verify_token_middleware(request: Request, call_next):
             token, str(JWT_SECRET_KEY), algorithms=[str(JWT_ALGORITHM)]
         )
         request.state.user = payload
-    except JWTError:
+    except JWTError as e:
+        print(f"[AUTH 401] Path: {request.url.path} | Reason: JWT decode failed ({str(e)})")
         return JSONResponse(
             status_code=401, content={"detail": "Invalid or expired token"}
         )
