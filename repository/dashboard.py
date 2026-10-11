@@ -139,11 +139,16 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
     month_result = await _run_aggregation(month_pipeline)
     month_completed_count = month_result[0]["count"] if month_result else 0
 
-    low_stock = await Inventory.find(
+    all_inventory = await Inventory.find(
         Inventory.worker_shop_name == shop_name,
-        Inventory.is_deleted == False, # noqa
-        Inventory.amount_available < LOW_STOCK_THRESHOLD,
-    ).sort(Inventory.amount_available).to_list() # noqa
+        Inventory.is_deleted == False,
+    ).to_list()
+    total_stock_val = round(sum(max(0, i.amount_available) * (i.product_price or 0.0) for i in all_inventory), 2)
+    total_stock_cost_val = round(sum(max(0, i.amount_available) * (i.cost_price or 0.0) for i in all_inventory), 2)
+    total_inv_count = len(all_inventory)
+
+    low_stock = [i for i in all_inventory if i.amount_available < LOW_STOCK_THRESHOLD]
+    low_stock.sort(key=lambda x: x.amount_available)
 
     return DashboardOverview(
         today_revenue=today_revenue,
@@ -165,4 +170,7 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
             {"id": str(i.id), "product_name": i.product_name, "amount_available": i.amount_available} # noqa
             for i in low_stock
         ], # type: ignore
+        total_stock_value=total_stock_val,
+        total_stock_cost_value=total_stock_cost_val,
+        total_inventory_items=total_inv_count,
     )

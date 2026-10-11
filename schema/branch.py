@@ -28,6 +28,9 @@ class BranchResponse(BaseModel):
     is_active: bool
     worker_count: int = 0
     inventory_count: int = 0
+    stock_value: float = 0.0
+    stock_cost_value: float = 0.0
+    total_units: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

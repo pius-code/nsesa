@@ -38,3 +38,6 @@ class DashboardOverview(BaseModel):
     payment_breakdown_today: List[PaymentBreakdownEntry]
     top_products_week: List[TopProductEntry]
     low_stock_items: List[LowStockEntry]
+    total_stock_value: float = 0.0
+    total_stock_cost_value: float = 0.0
+    total_inventory_items: int = 0

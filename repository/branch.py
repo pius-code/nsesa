@@ -52,9 +52,37 @@ async def create_branch(payload: BranchCreate, admin_id: str) -> BranchResponse:
         is_active=branch.is_active,
         worker_count=0,
         inventory_count=0,
+        stock_value=0.0,
+        stock_cost_value=0.0,
+        total_units=0,
         created_at=branch.created_at,
         updated_at=branch.updated_at,
     )
+
+
+async def _calculate_branch_stock(shop_name: str, branch_name: str, is_main: bool):
+    if is_main:
+        inv_items = await Inventory.find(
+            Inventory.worker_shop_name == shop_name,
+            Inventory.is_deleted == False,
+            {"$or": [
+                {"branch_name": branch_name},
+                {"branch_name": None},
+                {"branch_name": ""},
+            ]},
+        ).to_list()
+    else:
+        inv_items = await Inventory.find(
+            Inventory.worker_shop_name == shop_name,
+            Inventory.branch_name == branch_name,
+            Inventory.is_deleted == False,
+        ).to_list()
+
+    inv_count = len(inv_items)
+    total_units = sum(max(0, item.amount_available) for item in inv_items)
+    stock_val = round(sum(max(0, item.amount_available) * (item.product_price or 0.0) for item in inv_items), 2)
+    stock_cost_val = round(sum(max(0, item.amount_available) * (item.cost_price or 0.0) for item in inv_items), 2)
+    return inv_count, total_units, stock_val, stock_cost_val
 
 
 async def get_shop_branches(shop_name: str) -> list[BranchResponse]:
@@ -71,11 +99,9 @@ async def get_shop_branches(shop_name: str) -> list[BranchResponse]:
             Stakeholder.is_active == True,
         ).count()
 
-        inv = await Inventory.find(
-            Inventory.worker_shop_name == shop_name,
-            Inventory.branch_name == b.branch_name,
-            Inventory.is_deleted == False,
-        ).count()
+        inv_count, total_units, stock_val, stock_cost_val = await _calculate_branch_stock(
+            shop_name, b.branch_name, b.is_main
+        )
 
         responses.append(
             BranchResponse(
@@ -87,7 +113,10 @@ async def get_shop_branches(shop_name: str) -> list[BranchResponse]:
                 is_main=b.is_main,
                 is_active=b.is_active,
                 worker_count=workers,
-                inventory_count=inv,
+                inventory_count=inv_count,
+                stock_value=stock_val,
+                stock_cost_value=stock_cost_val,
+                total_units=total_units,
                 created_at=b.created_at,
                 updated_at=b.updated_at,
             )
@@ -134,11 +163,9 @@ async def update_branch(branch_id: str, payload: BranchUpdate, admin_id: str) ->
         Stakeholder.is_active == True,
     ).count()
 
-    inv = await Inventory.find(
-        Inventory.worker_shop_name == shop_name,
-        Inventory.branch_name == branch.branch_name,
-        Inventory.is_deleted == False,
-    ).count()
+    inv_count, total_units, stock_val, stock_cost_val = await _calculate_branch_stock(
+        shop_name, branch.branch_name, branch.is_main
+    )
 
     return BranchResponse(
         id=str(branch.id),
@@ -149,7 +176,10 @@ async def update_branch(branch_id: str, payload: BranchUpdate, admin_id: str) ->
         is_main=branch.is_main,
         is_active=branch.is_active,
         worker_count=workers,
-        inventory_count=inv,
+        inventory_count=inv_count,
+        stock_value=stock_val,
+        stock_cost_value=stock_cost_val,
+        total_units=total_units,
         created_at=branch.created_at,
         updated_at=branch.updated_at,
     )
