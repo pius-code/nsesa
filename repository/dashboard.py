@@ -5,12 +5,12 @@ from beanie.operators import In
 from model.Transaction import Transaction
 from model.TransactionAudit import TransactionAudit
 from model.Inventory import Inventory
-from schema.dashboard import DashboardOverview
+from model.Branch import Branch
+from schema.dashboard import DashboardOverview, LowStockEntry
 
 LOW_STOCK_THRESHOLD = 5
 
 # Matches both {is_deleted: false} and documents missing the field entirely
-# — see the same note in repository/transaction.py for why this is needed.
 NOT_DELETED = {"$or": [{"is_deleted": False}, {"is_deleted": None}]}
 
 
@@ -18,29 +18,63 @@ def _day_start(dt: datetime) -> datetime:
     return dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def _combine_match(*parts: dict) -> dict:
+    valid = [p for p in parts if p]
+    if not valid:
+        return {}
+    if len(valid) == 1:
+        return valid[0]
+    return {"$and": valid}
+
+
 async def _run_aggregation(pipeline: list) -> list:
-    # Beanie 2.0.1's Document.aggregate() awaits the motor cursor's
-    # .aggregate() call as if it were pymongo's native async driver, but
-    # motor's .aggregate() returns a cursor synchronously (no await) — the
-    # two are incompatible, so we drive the raw motor collection ourselves. # noqa
     collection = Transaction.get_pymongo_collection()
     cursor = collection.aggregate(pipeline)
     return await cursor.to_list(length=None)
 
 
-async def _revenue_and_count(shop_name: str, start: datetime, end: datetime | None = None): # noqa
+async def _build_branch_query(shop_name: str, branch_name: str | None) -> tuple[dict, str]:
+    main_branch = await Branch.find_one(
+        Branch.shop_name == shop_name, Branch.is_main == True, Branch.is_active == True
+    )
+    main_branch_name = main_branch.branch_name if main_branch else "Main Branch"
+
+    if not branch_name or branch_name.strip().lower() == "all":
+        return {}, main_branch_name
+
+    target = branch_name.strip()
+    is_main = target.lower() in ("main", "main branch", main_branch_name.lower())
+    if is_main:
+        query = {
+            "$or": [
+                {"branch_name": target},
+                {"branch_name": main_branch_name},
+                {"branch_name": None},
+                {"branch_name": ""},
+                {"branch_name": {"$regex": r"^main(\s+branch)?$", "$options": "i"}},
+            ]
+        }
+    else:
+        query = {"branch_name": target}
+
+    return query, main_branch_name
+
+
+async def _revenue_and_count(
+    shop_name: str, start: datetime, end: datetime | None = None, branch_query: dict = {}
+):
     created_at_filter = {"$gte": start}
     if end:
         created_at_filter["$lt"] = end
 
+    match_stage = _combine_match(
+        {"at_shop": shop_name, "status": "success", "created_at": created_at_filter},
+        NOT_DELETED,
+        branch_query,
+    )
     pipeline = [
-        {"$match": {
-            "at_shop": shop_name,
-            "status": "success",
-            "created_at": created_at_filter,
-            **NOT_DELETED,
-        }},
-        {"$group": {"_id": None, "revenue": {"$sum": "$total_price"}, "count": {"$sum": 1}}}, # noqa
+        {"$match": match_stage},
+        {"$group": {"_id": None, "revenue": {"$sum": "$total_price"}, "count": {"$sum": 1}}},
     ]
     result = await _run_aggregation(pipeline)
     if not result:
@@ -48,37 +82,43 @@ async def _revenue_and_count(shop_name: str, start: datetime, end: datetime | No
     return result[0]["revenue"], result[0]["count"]
 
 
-async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
+async def get_dashboard_overview(shop_name: str, branch_name: str | None = None) -> DashboardOverview:
     now = datetime.now(timezone.utc)
     today_start = _day_start(now)
     yesterday_start = today_start - timedelta(days=1)
     week_start = today_start - timedelta(days=6)  # rolling 7 days incl. today
     prev_week_start = week_start - timedelta(days=7)
 
-    today_revenue, today_count = await _revenue_and_count(shop_name, today_start) # noqa
-    yesterday_revenue, _ = await _revenue_and_count(shop_name, yesterday_start, today_start) # noqa
-    week_revenue, week_count = await _revenue_and_count(shop_name, week_start)
-    previous_week_revenue, _ = await _revenue_and_count(shop_name, prev_week_start, week_start) # noqa
+    branch_query, main_branch_name = await _build_branch_query(shop_name, branch_name)
 
+    today_revenue, today_count = await _revenue_and_count(shop_name, today_start, branch_query=branch_query)
+    yesterday_revenue, _ = await _revenue_and_count(shop_name, yesterday_start, today_start, branch_query=branch_query)
+    week_revenue, week_count = await _revenue_and_count(shop_name, week_start, branch_query=branch_query)
+    previous_week_revenue, _ = await _revenue_and_count(shop_name, prev_week_start, week_start, branch_query=branch_query)
+
+    payment_match = _combine_match(
+        {"at_shop": shop_name, "status": "success", "created_at": {"$gte": today_start}},
+        NOT_DELETED,
+        branch_query,
+    )
     payment_pipeline = [
-        {"$match": {
-            "at_shop": shop_name, "status": "success",
-            "created_at": {"$gte": today_start}, **NOT_DELETED,
-        }},
-        {"$group": {"_id": "$payment_mode", "total": {"$sum": "$total_price"}, "count": {"$sum": 1}}}, # noqa
+        {"$match": payment_match},
+        {"$group": {"_id": "$payment_mode", "total": {"$sum": "$total_price"}, "count": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]
     payment_rows = await _run_aggregation(payment_pipeline)
     payment_breakdown = [
-        {"payment_mode": row["_id"] or "unspecified", "total": row["total"], "count": row["count"]} # noqa
+        {"payment_mode": row["_id"] or "unspecified", "total": row["total"], "count": row["count"]}
         for row in payment_rows
     ]
 
+    top_products_match = _combine_match(
+        {"at_shop": shop_name, "status": "success", "created_at": {"$gte": week_start}},
+        NOT_DELETED,
+        branch_query,
+    )
     top_products_pipeline = [
-        {"$match": {
-            "at_shop": shop_name, "status": "success",
-            "created_at": {"$gte": week_start}, **NOT_DELETED,
-        }},
+        {"$match": top_products_match},
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
@@ -106,34 +146,57 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         TransactionAudit.created_at >= today_start,
     ).to_list()
     refund_value = 0.0
+    refund_count = 0
     if refund_entries:
-        refund_tx_ids = [PydanticObjectId(e.transaction_id) for e in refund_entries] # noqa
-        refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list() # noqa
-        refund_value = sum(t.total_price for t in refunded_txs)
+        refund_tx_ids = [PydanticObjectId(e.transaction_id) for e in refund_entries]
+        refunded_txs = await Transaction.find(In(Transaction.id, refund_tx_ids)).to_list()
+        if branch_name and branch_name.strip().lower() != "all":
+            target = branch_name.strip().lower()
+            is_main = target in ("main", "main branch", main_branch_name.lower())
+            scoped_txs = []
+            for t in refunded_txs:
+                t_br = (t.branch_name or "").strip().lower()
+                if is_main:
+                    if not t_br or t_br in ("main", "main branch", main_branch_name.lower(), target):
+                        scoped_txs.append(t)
+                else:
+                    if t_br == target:
+                        scoped_txs.append(t)
+            refund_value = sum(t.total_price for t in scoped_txs)
+            refund_count = len(scoped_txs)
+        else:
+            refund_value = sum(t.total_price for t in refunded_txs)
+            refund_count = len(refund_entries)
 
-    # cancelled pending orders are soft-deleted but keep status="pending", so
-    # NOT_DELETED must be applied here too or cancelled tabs would still count # noqa
+    pending_match = _combine_match(
+        {"at_shop": shop_name, "status": "pending"},
+        NOT_DELETED,
+        branch_query,
+    )
     pending_pipeline = [
-        {"$match": {"at_shop": shop_name, "status": "pending", **NOT_DELETED}},
-        {"$group": {"_id": None, "value": {"$sum": "$total_price"}, "count": {"$sum": 1}}}, # noqa
+        {"$match": pending_match},
+        {"$group": {"_id": None, "value": {"$sum": "$total_price"}, "count": {"$sum": 1}}},
     ]
     pending_result = await _run_aggregation(pending_pipeline)
     pending_count = pending_result[0]["count"] if pending_result else 0
     pending_value = pending_result[0]["value"] if pending_result else 0.0
 
-    # Unique customers by name, excluding the "customer" placeholder used for
-    # walk-ins who didn't give a name.
-    names = await Transaction.get_pymongo_collection().distinct(
-        "customer_name", {"at_shop": shop_name, **NOT_DELETED}
+    cust_match = _combine_match(
+        {"at_shop": shop_name},
+        NOT_DELETED,
+        branch_query,
     )
-    unique_customers = {n.strip().lower() for n in names if n and n.strip().lower() != "customer"} # noqa
+    names = await Transaction.get_pymongo_collection().distinct("customer_name", cust_match)
+    unique_customers = {n.strip().lower() for n in names if n and n.strip().lower() != "customer"}
 
     month_start = today_start.replace(day=1)
+    month_match = _combine_match(
+        {"at_shop": shop_name, "status": {"$ne": "pending"}, "created_at": {"$gte": month_start}},
+        NOT_DELETED,
+        branch_query,
+    )
     month_pipeline = [
-        {"$match": {
-            "at_shop": shop_name, "status": {"$ne": "pending"},
-            "created_at": {"$gte": month_start}, **NOT_DELETED,
-        }},
+        {"$match": month_match},
         {"$count": "count"},
     ]
     month_result = await _run_aggregation(month_pipeline)
@@ -143,34 +206,57 @@ async def get_dashboard_overview(shop_name: str) -> DashboardOverview:
         Inventory.worker_shop_name == shop_name,
         Inventory.is_deleted == False,
     ).to_list()
-    total_stock_val = round(sum(max(0, i.amount_available) * (i.product_price or 0.0) for i in all_inventory), 2)
-    total_stock_cost_val = round(sum(max(0, i.amount_available) * (i.cost_price or 0.0) for i in all_inventory), 2)
-    total_inv_count = len(all_inventory)
 
-    low_stock = [i for i in all_inventory if i.amount_available < LOW_STOCK_THRESHOLD]
+    total_qty_by_name = {}
+    for i in all_inventory:
+        pname = (i.product_name or "").strip().lower()
+        total_qty_by_name[pname] = total_qty_by_name.get(pname, 0) + max(0, i.amount_available)
+
+    target_branch = branch_name.strip().lower() if branch_name and branch_name.strip().lower() != "all" else None
+    is_filtering_main = target_branch in ("main", "main branch", main_branch_name.lower()) if target_branch else False
+
+    low_stock = []
+    for i in all_inventory:
+        if i.amount_available < LOW_STOCK_THRESHOLD:
+            pname = (i.product_name or "").strip().lower()
+            br = i.branch_name.strip() if i.branch_name else main_branch_name
+            if br.lower() in ("main", "main branch"):
+                br = main_branch_name
+
+            if target_branch:
+                if is_filtering_main:
+                    if br.lower() not in (main_branch_name.lower(), target_branch):
+                        continue
+                else:
+                    if br.lower() != target_branch:
+                        continue
+
+            low_stock.append(
+                LowStockEntry(
+                    id=str(i.id),
+                    product_name=i.product_name,
+                    amount_available=i.amount_available,
+                    branch_name=br,
+                    total_shop_quantity=total_qty_by_name.get(pname, i.amount_available),
+                )
+            )
     low_stock.sort(key=lambda x: x.amount_available)
 
     return DashboardOverview(
         today_revenue=today_revenue,
         today_transaction_count=today_count,
-        today_avg_transaction=(today_revenue / today_count) if today_count else 0.0, # noqa
+        today_avg_transaction=(today_revenue / today_count) if today_count else 0.0,
         yesterday_revenue=yesterday_revenue,
         week_revenue=week_revenue,
         week_transaction_count=week_count,
         previous_week_revenue=previous_week_revenue,
-        today_refund_count=len(refund_entries),
+        today_refund_count=refund_count,
         today_refund_value=refund_value,
         pending_order_count=pending_count,
         pending_order_value=pending_value,
         total_unique_customers=len(unique_customers),
         month_completed_transaction_count=month_completed_count,
-        payment_breakdown_today=payment_breakdown, # type: ignore
-        top_products_week=top_products, # type: ignore
-        low_stock_items=[
-            {"id": str(i.id), "product_name": i.product_name, "amount_available": i.amount_available} # noqa
-            for i in low_stock
-        ], # type: ignore
-        total_stock_value=total_stock_val,
-        total_stock_cost_value=total_stock_cost_val,
-        total_inventory_items=total_inv_count,
+        payment_breakdown_today=payment_breakdown,
+        top_products_week=top_products,
+        low_stock_items=low_stock,
     )

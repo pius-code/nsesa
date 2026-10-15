@@ -19,6 +19,8 @@ class LowStockEntry(BaseModel):
     id: str
     product_name: str
     amount_available: int
+    branch_name: str | None = None
+    total_shop_quantity: int | None = None
 
 
 class DashboardOverview(BaseModel):

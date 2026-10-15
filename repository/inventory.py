@@ -1,5 +1,6 @@
 from model.Inventory import Inventory
 from model.Category import Category
+from model.Branch import Branch
 from model.StockMovement import StockMovement
 from schema.inventory import (
     InventoryCreate,
@@ -72,14 +73,29 @@ async def get_all_inventory_items_for_shop(worker_id: str, branch_name: str | No
     perms = worker.permissions or {}
     is_global = perms.get("is_global", False) or worker.worker_role in ("admin", "super_admin")
 
-    if is_global:
-        # Admins / global workers: apply optional branch filter from query param
-        if branch_name and branch_name.lower() != "all":
-            filters.append(Inventory.branch_name == branch_name)
-    else:
-        # Branch-scoped workers: always see only their own branch's products
-        if worker.worker_branch_name:
-            filters.append(Inventory.branch_name == worker.worker_branch_name)
+    main_branch = await Branch.find_one(
+        Branch.shop_name == worker.worker_shop_name,
+        Branch.is_main == True,
+        Branch.is_active == True,
+    )
+
+    target_branch = branch_name if is_global else worker.worker_branch_name
+
+    if target_branch and target_branch.strip().lower() != "all":
+        is_main = main_branch and main_branch.branch_name.strip().lower() == target_branch.strip().lower()
+        if is_main:
+            filters.append(
+                {
+                    "$or": [
+                        {"branch_name": target_branch},
+                        {"branch_name": None},
+                        {"branch_name": ""},
+                        {"branch_name": {"$regex": r"^main(\s+branch)?$", "$options": "i"}},
+                    ]
+                }
+            )
+        else:
+            filters.append(Inventory.branch_name == target_branch)
 
     items = await Inventory.find(*filters).sort(-Inventory.updated_at).to_list()
     return items
