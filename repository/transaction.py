@@ -6,6 +6,7 @@ from schema.transaction import TransactionCreate, TransactionActionRequest, Tran
 from model.Inventory import Inventory
 from model.Stakeholder import Stakeholder
 from model.Client import Client
+from model.Branch import Branch
 from beanie.operators import Or, In
 from utils.arkesel_sms import send_transaction_receipt_sms, send_refund_notice_sms # noqa
 from repository.transaction_audit import log_transaction_action, get_transaction_audit_log # noqa
@@ -182,8 +183,25 @@ async def get_my_shop_transactions(
         filters.append(Transaction.status == status)
     if processed_by:
         filters.append(Transaction.processed_by == processed_by)
-    if branch_name and branch_name.lower() != "all":
-        filters.append(Transaction.branch_name == branch_name)
+    if branch_name and branch_name.strip().lower() != "all":
+        main_branch = await Branch.find_one(
+            Branch.shop_name == shop_name, Branch.is_main == True, Branch.is_active == True
+        )
+        main_branch_name = main_branch.branch_name if main_branch else "Main Branch"
+        target = branch_name.strip()
+        is_main = target.lower() in ("main", "main branch", main_branch_name.lower())
+        if is_main:
+            filters.append({
+                "$or": [
+                    {"branch_name": target},
+                    {"branch_name": main_branch_name},
+                    {"branch_name": None},
+                    {"branch_name": ""},
+                    {"branch_name": {"$regex": r"^main(\s+branch)?$", "$options": "i"}},
+                ]
+            })
+        else:
+            filters.append(Transaction.branch_name == target)
     if start_date:
         try:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) # noqa

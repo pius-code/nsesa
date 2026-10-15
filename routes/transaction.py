@@ -54,8 +54,11 @@ async def get_my_shop_transactions(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    effective_processed_by = processed_by
     perms = worker.permissions or {}
+    is_global = perms.get("is_global", False) or worker.worker_role in ("admin", "super_admin")
+    effective_branch = branch_name if is_global else worker.worker_branch_name
+
+    effective_processed_by = processed_by
     # Workers without view_all_transactions can only see their own
     if not perms.get("view_all_transactions", False) and worker.worker_role not in ("admin", "super_admin"):
         effective_processed_by = worker.worker_name
@@ -66,7 +69,7 @@ async def get_my_shop_transactions(
         end_date=end_date,
         processed_by=effective_processed_by,
         status=status,
-        branch_name=branch_name,
+        branch_name=effective_branch,
     )
 
 

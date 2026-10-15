@@ -10,3 +10,4 @@ wheels/
 .venv
 .env
 scratch/
+security_flaw.md
